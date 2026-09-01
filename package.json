@@ -1,0 +1,48 @@
+{
+  "name": "karen-ia-assistant",
+  "version": "1.0.0",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "dev": "tsc --noEmitOnError false && node scripts/copy-static.js && electron .",
+    "build": "tsc && node scripts/copy-static.js",
+    "start": "npm run build && electron .",
+    "dist": "npm run build && electron-builder"
+  },
+  "dependencies": {
+    "axios": "^1.16.1",
+    "cheerio": "^1.2.0",
+    "cmake-js": "^8.0.0",
+    "dotenv": "^16.4.5",
+    "googleapis": "^171.4.0",
+    "node-speech": "^1.0.5",
+    "ollama": "^0.6.3",
+    "pdf-lib": "^1.17.1",
+    "say": "^0.16.0",
+    "screenshot-desktop": "^1.15.4",
+    "spotify-web-api-node": "^5.0.2",
+    "uuid": "^14.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.43",
+    "@types/spotify-web-api-node": "^5.0.11",
+    "electron": "^42.2.0",
+    "electron-builder": "^26.8.1",
+    "typescript": "^5.9.3"
+  },
+  "build": {
+    "appId": "com.karen.assistant",
+    "productName": "Karen IA Assistant",
+    "win": {
+      "target": "portable",
+      "signAndEditExecutable": false
+    },
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ]
+  }
+}
