@@ -36,9 +36,11 @@ let el: {
   btnMinimize: HTMLButtonElement | null;
   btnClose: HTMLButtonElement | null;
   btnAlwaysOnTop: HTMLButtonElement | null;
+  btnFullscreen: HTMLButtonElement | null;
   statusDot: HTMLElement | null;
   statusText: HTMLElement | null;
   statusModel: HTMLElement | null;
+  modelSelect: HTMLSelectElement | null;
   chipRow: HTMLElement | null;
 };
 
@@ -54,9 +56,11 @@ function bindElements(): void {
     btnMinimize: document.getElementById('btn-minimize') as HTMLButtonElement,
     btnClose: document.getElementById('btn-close') as HTMLButtonElement,
     btnAlwaysOnTop: document.getElementById('btn-always-on-top') as HTMLButtonElement,
+    btnFullscreen: document.getElementById('btn-fullscreen') as HTMLButtonElement,
     statusDot: document.getElementById('status-dot'),
     statusText: document.getElementById('status-text'),
     statusModel: document.getElementById('status-model'),
+    modelSelect: document.getElementById('model-select') as HTMLSelectElement,
     chipRow: document.getElementById('chip-row'),
   };
 
@@ -72,6 +76,7 @@ document.addEventListener('DOMContentLoaded', () => {
   bindElements();
   setupEventListeners();
   setupAutoResize();
+  setupModelPicker();
   refreshStatus();
   setInterval(refreshStatus, 15000);
 });
@@ -91,6 +96,19 @@ function setupEventListeners(): void {
     el.btnAlwaysOnTop?.classList.toggle('active');
   });
 
+  el.btnFullscreen?.addEventListener('click', async () => {
+    try {
+      const fullscreen = await getElectronAPI()?.toggleFullscreen?.();
+      updateFullscreenButton(!!fullscreen);
+    } catch {
+      showToast('Não foi possível alternar a tela cheia');
+    }
+  });
+
+  getElectronAPI()?.onFullscreenStateChanged?.((fullscreen: boolean) => {
+    updateFullscreenButton(fullscreen);
+  });
+
   el.chipRow?.addEventListener('click', (e: MouseEvent) => {
     const chip = (e.target as HTMLElement).closest<HTMLElement>('[data-command]');
     if (!chip) return;
@@ -102,6 +120,40 @@ function setupEventListeners(): void {
     addMessage('assistant', data.block);
   });
   api?.onNewChat?.(() => clearChat());
+}
+
+function updateFullscreenButton(fullscreen: boolean): void {
+  el.btnFullscreen?.classList.toggle('active', fullscreen);
+  el.btnFullscreen?.setAttribute('aria-label', fullscreen ? 'Sair da tela cheia' : 'Tela cheia');
+  el.btnFullscreen?.setAttribute('title', fullscreen ? 'Sair da tela cheia' : 'Tela cheia');
+}
+
+async function setupModelPicker(): Promise<void> {
+  const api = getElectronAPI();
+  if (!el.modelSelect || !api?.getAvailableModels) return;
+
+  const models = await api.getAvailableModels();
+  el.modelSelect.innerHTML = '';
+
+  for (const model of models) {
+    const option = document.createElement('option');
+    option.value = model.name;
+    option.textContent = model.label;
+    el.modelSelect.appendChild(option);
+  }
+
+  const status = await api.getKarenStatus?.();
+  if (status?.model) el.modelSelect.value = status.model;
+
+  el.modelSelect.addEventListener('change', async () => {
+    const result = await api.setKarenModel?.(el.modelSelect!.value);
+    if (!result?.success) {
+      showToast('Não foi possível trocar o modelo');
+      return;
+    }
+    setStatus(false, result.model);
+    showToast(`Modelo alterado: ${result.model}`);
+  });
 }
 
 function setupAutoResize(): void {
@@ -265,6 +317,36 @@ function addMessage(role: 'user' | 'assistant', content: string, imageData?: str
   textEl.innerHTML = formatMessage(content);
   body.appendChild(textEl);
 
+  if (role === 'assistant') {
+    const actions = document.createElement('div');
+    actions.className = 'message-actions';
+
+    const copyButton = document.createElement('button');
+    copyButton.className = 'message-action';
+    copyButton.type = 'button';
+    copyButton.title = 'Copiar mensagem';
+    copyButton.setAttribute('aria-label', 'Copiar mensagem');
+    copyButton.textContent = 'Copiar';
+    copyButton.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(content);
+        copyButton.textContent = 'Copiado';
+        setTimeout(() => { copyButton.textContent = 'Copiar'; }, 1500);
+      } catch {
+        showToast('Não foi possível copiar a mensagem');
+      }
+    });
+    actions.appendChild(copyButton);
+    body.appendChild(actions);
+
+    body.querySelectorAll<HTMLAnchorElement>('a[data-external-url]').forEach((link) => {
+      link.addEventListener('click', (event) => {
+        event.preventDefault();
+        getElectronAPI()?.openExternalUrl?.(link.dataset.externalUrl || link.href);
+      });
+    });
+  }
+
   const time = document.createElement('div');
   time.className = 'entry-time';
   time.textContent = formatTime(timestamp);
@@ -313,6 +395,17 @@ function formatMessage(content: string): string {
   formatted = formatted.replace(/```(\w+)?\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
   formatted = formatted.replace(/`([^`]+)`/g, '<code>$1</code>');
   formatted = formatted.replace(/\n/g, '<br>');
+
+  // Renderiza somente links HTTP(S) como links clicáveis.
+  formatted = formatted.replace(
+    /https?:\/\/[^\s<>"']+/g,
+    (url) => {
+      const cleanUrl = url.replace(/[),.;!?]+$/g, '');
+      const trailing = url.slice(cleanUrl.length);
+      const escapedUrl = cleanUrl.replace(/&amp;/g, '&');
+      return `<a href="${cleanUrl}" data-external-url="${escapedUrl}" rel="noreferrer">${cleanUrl}</a>${trailing}`;
+    }
+  );
 
   formatted = formatted.replace(
     /\[PERMISSÃO NECESSÁRIA\](.*?)(?=<br><br>|$)/gs,

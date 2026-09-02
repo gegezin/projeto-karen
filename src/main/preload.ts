@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 // Expõe a API para a janela do navegador (renderer.ts)
 contextBridge.exposeInMainWorld('electronAPI', {
   sendMessage: (message: string) => ipcRenderer.invoke('send-message', message),
+  openExternalUrl: (url: string) => ipcRenderer.invoke('open-external-url', url),
   getScreenshot: () => ipcRenderer.invoke('get-screenshot'),
   minimizeWindow: () => ipcRenderer.send('minimize-window'),
   hideWindow: () => ipcRenderer.send('hide-window'),
@@ -11,6 +12,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onNewChat: (callback: () => void) => ipcRenderer.on('new-chat', () => callback()),
   onPermissionRequest: (callback: (data: any) => void) => ipcRenderer.on('permission-request', (event, data) => callback(data)),
   getKarenStatus: () => ipcRenderer.invoke('get-karen-status'),
+  toggleFullscreen: () => ipcRenderer.invoke('toggle-fullscreen'),
+  onFullscreenStateChanged: (callback: (fullscreen: boolean) => void) =>
+    ipcRenderer.on('fullscreen-state-changed', (_event, fullscreen) => callback(fullscreen)),
+  getAvailableModels: () => ipcRenderer.invoke('get-available-models'),
+  setKarenModel: (modelName: string) => ipcRenderer.invoke('set-karen-model', modelName),
   
   // History
   saveMessageToHistory: (role: string, content: string) => ipcRenderer.send('save-message-to-history', role, content),

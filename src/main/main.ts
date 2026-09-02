@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, screen, nativeImage, Tray, Menu, globalShortcut } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, screen, nativeImage, Tray, Menu, globalShortcut, shell } from 'electron';
 import * as path from 'path';
 import * as dotenv from 'dotenv';
 import { PermissionManager } from '../permissions/permissionManager';
@@ -28,6 +28,7 @@ class IADesktopAssistant {
   private voiceActive = false;
   private globalShortcutEnabled = true;
   private devToolsOpen = false;
+  private windowEventCleanup: (() => void) | null = null;
 
   constructor() {
     this.permissionManager = new PermissionManager();
@@ -87,11 +88,14 @@ class IADesktopAssistant {
 
     app.on('before-quit', () => {
       this.isQuitting = true;
+      this.cleanupWindowEvents();
       this.karenBrain.destroy();
     });
   }
 
   private createWindow(): void {
+    // Limpar listeners da janela anterior se existir
+    this.cleanupWindowEvents();
     const primaryDisplay = screen.getPrimaryDisplay();
     const { width, height } = primaryDisplay.workAreaSize;
 
@@ -108,6 +112,7 @@ class IADesktopAssistant {
       minimizable: true,
       maximizable: false,
       closable: true,
+      fullscreenable: true,
       webPreferences: {
         nodeIntegration: false,
         contextIsolation: true,
@@ -118,28 +123,59 @@ class IADesktopAssistant {
 
     this.mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
 
+    // Configurar event listeners com cleanup automático
+    this.setupWindowEventListeners();
+  }
+
+  /**
+   * Configura todos os event listeners da janela com cleanup automático
+   * Previne memory leaks ao recriar/fechar a janela
+   */
+  private setupWindowEventListeners(): void {
+    const cleanupFunctions: Array<() => void> = [];
+
+    // Helper simples para adicionar listener com cleanup
+    const addListener = (
+      target: BrowserWindow | Electron.WebContents,
+      event: string,
+      handler: (...args: any[]) => void
+    ) => {
+      const listenerTarget = target as unknown as {
+        on: (eventName: string, listener: (...args: any[]) => void) => void;
+        off: (eventName: string, listener: (...args: any[]) => void) => void;
+      };
+      listenerTarget.on(event, handler);
+      cleanupFunctions.push(() => listenerTarget.off(event, handler));
+    };
+
+    const win = this.mainWindow!;
+    const wc = win.webContents;
+
     // DevTools desativado - usar F12 para abrir quando necessário
-    // this.mainWindow.webContents.openDevTools();
+    // wc.openDevTools();
 
     // Atalho F12 para abrir/fechar DevTools
-    this.mainWindow.webContents.on('before-input-event', (event, input) => {
+    addListener(wc, 'before-input-event', (event: Electron.Event, input: Electron.Input) => {
       if (input.key === 'F12') {
-        this.mainWindow?.webContents.toggleDevTools();
+        wc.toggleDevTools();
+        event.preventDefault();
+      } else if (input.key === 'Escape' && win.isFullScreen()) {
+        win.setFullScreen(false);
         event.preventDefault();
       }
     });
 
-    this.mainWindow.webContents.on('devtools-opened', () => {
+    addListener(wc, 'devtools-opened', () => {
       console.log('🛠️ DevTools aberto');
       this.devToolsOpen = true;
     });
 
-    this.mainWindow.webContents.on('devtools-closed', () => {
+    addListener(wc, 'devtools-closed', () => {
       console.log('🛠️ DevTools fechado');
       this.devToolsOpen = false;
     });
 
-    this.mainWindow.webContents.on('render-process-gone', (event, details) => {
+    addListener(wc, 'render-process-gone', (_event: Electron.Event, details: Electron.RenderProcessGoneDetails) => {
       console.error('🔥 Render process gone:', details);
       if (this.mainWindow) {
         this.mainWindow.show();
@@ -147,22 +183,22 @@ class IADesktopAssistant {
       }
     });
 
-    this.mainWindow.on('unresponsive', () => {
+    addListener(win, 'unresponsive', () => {
       console.warn('⚠️ Janela não respondeu (unresponsive)');
     });
 
-    this.mainWindow.on('close', (event) => {
-      const devToolsOpen = this.mainWindow?.webContents.isDevToolsOpened();
+    addListener(win, 'close', (event: Electron.Event) => {
+      const devToolsOpen = wc.isDevToolsOpened();
       if (!this.isQuitting && devToolsOpen) {
         console.log('⛔ DevTools aberto, não fechar/ocultar janela.');
         event.preventDefault();
-        this.mainWindow?.focus();
+        win.focus();
         return;
       }
 
       if (!this.isQuitting && !this.voiceActive) {
         event.preventDefault();
-        this.mainWindow?.hide();
+        win.hide();
       }
 
       if (!this.isQuitting && this.voiceActive) {
@@ -171,9 +207,8 @@ class IADesktopAssistant {
       }
     });
 
-    this.mainWindow.on('blur', () => {
+    addListener(win, 'blur', () => {
       console.log('🪟 BrowserWindow perdeu foco - voiceActive:', this.voiceActive);
-      // Se perdeu foco durante voz ativa, tentar recuperar foco
       if (this.voiceActive) {
         setTimeout(() => {
           if (this.mainWindow && this.voiceActive) {
@@ -184,12 +219,12 @@ class IADesktopAssistant {
       }
     });
 
-    this.mainWindow.on('focus', () => {
+    addListener(win, 'focus', () => {
       console.log('🪟 BrowserWindow ganhou foco');
     });
 
-    this.mainWindow.on('minimize', () => {
-      const devToolsOpen = this.mainWindow?.webContents.isDevToolsOpened();
+    addListener(win, 'minimize', () => {
+      const devToolsOpen = wc.isDevToolsOpened();
       console.log('🪟 BrowserWindow minimizada - devToolsOpen:', devToolsOpen, 'voiceActive:', this.voiceActive);
       if (devToolsOpen) {
         console.log('🛠️ DevTools aberto durante minimização, restaurando janela...');
@@ -203,7 +238,6 @@ class IADesktopAssistant {
         return;
       }
 
-      // Se foi minimizada durante voz ativa, restaurar imediatamente
       if (this.voiceActive) {
         console.log('🎙️ Janela minimizada durante voz ativa, restaurando...');
         setTimeout(() => {
@@ -216,27 +250,44 @@ class IADesktopAssistant {
       }
     });
 
-    this.mainWindow.on('hide', () => {
-      const devToolsOpen = this.mainWindow?.webContents.isDevToolsOpened();
+    addListener(win, 'hide', () => {
+      const devToolsOpen = wc.isDevToolsOpened();
       console.log('🪟 BrowserWindow escondida - devToolsOpen:', devToolsOpen);
       if (devToolsOpen) {
         console.log('🛠️ DevTools aberto, restaurando janela imediatamente');
-        this.mainWindow?.show();
-        this.mainWindow?.focus();
+        win.show();
+        win.focus();
       }
     });
 
-    this.mainWindow.on('restore', () => {
+    addListener(win, 'restore', () => {
       console.log('🪟 BrowserWindow restaurada');
     });
 
-    this.mainWindow.on('hide', () => {
+    addListener(win, 'hide', () => {
       console.log('🪟 BrowserWindow escondida');
     });
 
-    this.mainWindow.on('show', () => {
+    addListener(win, 'show', () => {
       console.log('🪟 BrowserWindow mostrada');
     });
+
+    // Armazenar função de cleanup
+    this.windowEventCleanup = () => {
+      console.log('🧹 Limpando event listeners da janela...');
+      cleanupFunctions.forEach(cleanup => cleanup());
+      cleanupFunctions.length = 0;
+    };
+  }
+
+  /**
+   * Limpa todos os event listeners da janela
+   */
+  private cleanupWindowEvents(): void {
+    if (this.windowEventCleanup) {
+      this.windowEventCleanup();
+      this.windowEventCleanup = null;
+    }
   }
 
   private createTray(): void {
@@ -280,6 +331,39 @@ class IADesktopAssistant {
   }
 
   private setupIPC(): void {
+    ipcMain.handle('get-available-models', () => {
+      return this.karenBrain.getAvailableModels();
+    });
+
+    ipcMain.handle('set-karen-model', (_event, modelName: unknown) => {
+      if (typeof modelName !== 'string') {
+        return { success: false, error: 'Modelo inválido' };
+      }
+
+      const success = this.karenBrain.setModelName(modelName);
+      return success
+        ? { success: true, model: this.karenBrain.getModelName() }
+        : { success: false, error: 'Modelo não permitido' };
+    });
+
+    ipcMain.handle('open-external-url', async (_event, rawUrl: unknown) => {
+      if (typeof rawUrl !== 'string') {
+        return { success: false, error: 'URL inválida' };
+      }
+
+      try {
+        const url = new URL(rawUrl);
+        if (!['http:', 'https:'].includes(url.protocol)) {
+          return { success: false, error: 'Apenas URLs HTTP e HTTPS são permitidas' };
+        }
+
+        await shell.openExternal(url.toString());
+        return { success: true };
+      } catch {
+        return { success: false, error: 'URL inválida' };
+      }
+    });
+
     ipcMain.handle('send-message', async (event, message: string) => {
       try {
         // Input validation
@@ -349,6 +433,17 @@ class IADesktopAssistant {
 
     ipcMain.handle('get-karen-status', () => {
       return this.karenBrain.getStatus();
+    });
+
+    ipcMain.handle('toggle-fullscreen', (event) => {
+      if (!this.mainWindow || this.mainWindow.isDestroyed()) {
+        return false;
+      }
+
+      const nextState = !this.mainWindow.isFullScreen();
+      this.mainWindow.setFullScreen(nextState);
+      event.sender.send('fullscreen-state-changed', nextState);
+      return nextState;
     });
 
 

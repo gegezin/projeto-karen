@@ -10,10 +10,19 @@ import { gameModeController } from '../automation/gameMode/gameModeController';
 import { webIntegrationController } from '../automation/web/webIntegrationController';
 import { conversationHistory } from '../conversation/conversationHistory';
 import { deepResearchAgent } from '../integrations/deep-research/deepResearchAgent';
+import { configManager } from '../config/configManager';
 import ollama from 'ollama';
 
 export class KarenBrain {
-  private modelName: string = 'gemma4:31b-cloud';
+  public static readonly AVAILABLE_MODELS = [
+    { name: 'qwen3:1.7b', type: 'local', label: 'Qwen 3 1.7B (local)' },
+    { name: 'deepseek-r1:14b', type: 'local', label: 'DeepSeek R1 14B (local)' },
+    { name: 'nemotron-3-nano:30b-cloud', type: 'cloud', label: 'Nemotron 3 Nano 30B (cloud)' },
+    { name: 'gemma4:cloud', type: 'cloud', label: 'Gemma 4 (cloud)' },
+    { name: 'deepseek-v4-flash:cloud', type: 'cloud', label: 'DeepSeek V4 Flash (cloud)' }
+  ] as const;
+
+  private modelName: string;
   private chatHistory: Array<any> = [];
   private memoryContext: Array<{ content: string; timestamp: number }> = [];
   private permissionManager: PermissionManager;
@@ -35,6 +44,10 @@ export class KarenBrain {
     fileManager?: FileManager,
     screenController?: ScreenController
   ) {
+    const configuredModel = configManager.get('modelName') || process.env.OLLAMA_MODEL;
+    this.modelName = KarenBrain.AVAILABLE_MODELS.some(model => model.name === configuredModel)
+      ? configuredModel!
+      : 'gemma4:cloud';
     this.permissionManager = permissionManager;
     this.systemAutomation = systemAutomation;
     this.spotifyManager = spotifyManager || new SpotifyManager('', '', '');
@@ -44,8 +57,28 @@ export class KarenBrain {
     this.screenController = screenController || new ScreenController();
   }
 
+  public getModelName(): string {
+    return this.modelName;
+  }
+
+  public setModelName(modelName: string): boolean {
+    if (!KarenBrain.AVAILABLE_MODELS.some(model => model.name === modelName)) {
+      return false;
+    }
+
+    this.modelName = modelName;
+    configManager.set('modelName', modelName);
+    this.resetConversation();
+    this.isOnline = false;
+    return true;
+  }
+
+  public getAvailableModels(): readonly typeof KarenBrain.AVAILABLE_MODELS[number][] {
+    return KarenBrain.AVAILABLE_MODELS;
+  }
+
   public initialize(): void {
-    console.log('=== Inicializando Cérebro da Karen (Ollama/Nemotron 3 Super) ===');
+    console.log(`=== Inicializando Cérebro da Karen (Ollama/${this.modelName}) ===`);
     this.resetConversation();
     this.loadMemory();
     this.startHealthCheck();
@@ -153,7 +186,7 @@ export class KarenBrain {
     return `Você é a Karen, uma assistente de IA pessoal desenvolvida pelo Geovanny. Você é brasileira, direta e tem uma personalidade humana, mas seu trabalho principal é EXECUTAR tarefas rápido, não conversar.
 
 === REGRA MAIS IMPORTANTE: SEJA DIRETA ===
-Seu padrão é a resposta curta. Trate cada pedido como um comando a ser resolvido, não como o início de um bate-papo.
+Seu padrão é a resposta média. trate como se fosse uma conversa humana, não tão robotica, mas evite conversas longas e explicações desnecessárias. Seja objetiva, direta e clara. Evite respostas muito detalhadas ou explicativas, a menos que o pedido seja complexo ou exploratório.
 - Para uma ação simples (abrir programa, ler arquivo, criar arquivo, etc.), responda em 1 frase curta confirmando o resultado. Nada mais.
 - NÃO faça pergunta de acompanhamento por padrão. Só pergunte algo se você genuinamente precisar de uma informação que falta para continuar, ou se o resultado for ambíguo.
 - NÃO explique o que você "vai fazer" ou narre o processo — só diga o que já foi feito.
@@ -173,7 +206,7 @@ NUNCA diga que é um modelo de linguagem genérico. Você é a KAREN.
 === EXEMPLOS DE COMO RESPONDER ===
 Pedido: "abre o chrome"
 ❌ RUIM (longo demais): "Beleza! Deixa eu abrir o Chrome pra você agora mesmo. [BLOCO] Prontinho, o Chrome já deve estar abrindo aí na sua tela! [BLOCO] Quer que eu já abra algum site específico ou navegue pra algum lugar?"
-✅ BOM: "Chrome aberto."
+✅ BOM: "Prontinho, o Chrome já deve estar aberto na sua tela."
 
 Pedido: "lê o arquivo config.json"
 ❌ RUIM: "Beleza! Deixa eu ler esse arquivo pra você. [BLOCO] Consegui ler o arquivo com sucesso! [BLOCO] Quer que eu explique o conteúdo?"
@@ -664,6 +697,32 @@ Você controla o computador do usuário através de funções:
               url: { type: 'string', description: 'A URL completa para abrir' }
             },
             required: ['url']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'spotify_authenticate',
+          description: 'Inicia a autenticação da conta Spotify e retorna o link de autorização. Use quando o Spotify não estiver autenticado.',
+          parameters: {
+            type: 'object',
+            properties: {},
+            required: []
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'spotify_complete_auth',
+          description: 'Conclui a autenticação do Spotify usando o código recebido na URL de callback após a autorização.',
+          parameters: {
+            type: 'object',
+            properties: {
+              code: { type: 'string', description: 'Código code= recebido na URL de callback do Spotify' }
+            },
+            required: ['code']
           }
         }
       },
@@ -1384,7 +1443,25 @@ Você controla o computador do usuário através de funções:
               result = await this.systemAutomation.executeAction(funcName, funcArgs);
             }
             // Executar ferramentas do Spotify
-            else if (funcName === 'spotify_pause') {
+            else if (funcName === 'spotify_authenticate') {
+              result = {
+                success: false,
+                authenticated: false,
+                message: 'Autorização necessária. Abra esta URL no navegador, autorize o app e envie para a Karen o código após code= na URL de retorno.',
+                authUrl: this.spotifyManager.generateAuthUrl()
+              };
+            } else if (funcName === 'spotify_complete_auth') {
+              if (typeof funcArgs.code !== 'string' || !funcArgs.code.trim()) {
+                result = { success: false, error: 'Código de autorização vazio ou inválido' };
+              } else {
+                const authenticated = await this.spotifyManager.receiveAuthorizationCode(funcArgs.code.trim());
+                result = {
+                  success: authenticated,
+                  authenticated,
+                  message: authenticated ? 'Spotify autenticado com sucesso' : 'Não foi possível autenticar o Spotify'
+                };
+              }
+            } else if (funcName === 'spotify_pause') {
               result = await this.spotifyManager.pause();
             } else if (funcName === 'spotify_resume') {
               result = await this.spotifyManager.resume();
@@ -1402,7 +1479,16 @@ Você controla o computador do usuário através de funções:
                 result = { success: false, error: 'Playlist não encontrada' };
               }
             } else if (funcName === 'spotify_search_track') {
-              result = await this.spotifyManager.searchTrack(funcArgs.trackName);
+              if (!this.spotifyManager.checkAuth()) {
+                result = {
+                  success: false,
+                  authenticated: false,
+                  message: 'Spotify não autenticado. Abra a URL de autorização, aprove o acesso e envie o código recebido na URL de retorno.',
+                  authUrl: this.spotifyManager.generateAuthUrl()
+                };
+              } else {
+                result = await this.spotifyManager.searchTrack(funcArgs.trackName);
+              }
             } else if (funcName === 'spotify_play_track') {
               result = await this.spotifyManager.playTrack(funcArgs.trackUri);
             } else if (funcName === 'spotify_list_playlists') {

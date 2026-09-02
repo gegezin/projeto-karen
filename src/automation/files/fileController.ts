@@ -3,6 +3,7 @@ import * as path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { spawn } from 'child_process';
+import { app } from 'electron';
 
 const execAsync = promisify(exec);
 
@@ -15,14 +16,128 @@ export interface FileInfo {
   createdTime: Date;
 }
 
+/**
+ * Configuração de segurança para acesso a arquivos
+ * Define quais diretórios base são permitidos para operações de arquivo
+ */
+interface AllowedPathsConfig {
+  /** Diretórios base permitidos (resolvidos absolutamente) */
+  allowedBasePaths: string[];
+  /** Se deve permitir acesso ao diretório do projeto atual */
+  allowProjectDir: boolean;
+  /** Se deve permitir acesso ao userData do Electron (configs, logs) */
+  allowUserData: boolean;
+  /** Se deve permitir acesso ao diretório home do usuário */
+  allowHomeDir: boolean;
+  /** Diretórios adicionais customizados permitidos */
+  customAllowedPaths: string[];
+}
+
+const DEFAULT_ALLOWED_PATHS: AllowedPathsConfig = {
+  allowedBasePaths: [],
+  allowProjectDir: true,
+  allowUserData: true,
+  allowHomeDir: true,
+  customAllowedPaths: [],
+};
+
 export class FileController {
+  private allowedPathsConfig: AllowedPathsConfig;
+  private resolvedAllowedPaths: string[] = [];
+
+  constructor(config?: Partial<AllowedPathsConfig>) {
+    this.allowedPathsConfig = { ...DEFAULT_ALLOWED_PATHS, ...config };
+    this.initializeAllowedPaths();
+  }
+
+  /**
+   * Inicializa e resolve todos os caminhos permitidos
+   */
+  private initializeAllowedPaths(): void {
+    const paths: string[] = [];
+
+    if (this.allowedPathsConfig.allowProjectDir) {
+      // Diretório do projeto (onde está o package.json)
+      paths.push(process.cwd());
+      paths.push(path.join(process.cwd(), 'src'));
+      paths.push(path.join(process.cwd(), 'dist'));
+    }
+
+    if (this.allowedPathsConfig.allowUserData) {
+      try {
+        const userDataPath = app.getPath('userData');
+        paths.push(userDataPath);
+      } catch {
+        // app pode não estar disponível em alguns contextos
+      }
+    }
+
+    if (this.allowedPathsConfig.allowHomeDir) {
+      const homeDir = process.env.USERPROFILE || process.env.HOME;
+      if (homeDir) {
+        paths.push(homeDir);
+      }
+    }
+
+    // Adicionar caminhos customizados
+    paths.push(...this.allowedPathsConfig.customAllowedPaths);
+    paths.push(...this.allowedPathsConfig.allowedBasePaths);
+
+    // Resolver e normalizar todos os caminhos
+    this.resolvedAllowedPaths = paths
+      .map(p => path.resolve(p))
+      .filter((p, i, arr) => arr.indexOf(p) === i); // Remove duplicatas
+
+    console.log('📁 FileController - Diretórios permitidos:', this.resolvedAllowedPaths);
+  }
+
+  /**
+   * Adiciona um diretório permitido customizado
+   */
+  addAllowedPath(dirPath: string): void {
+    const resolved = path.resolve(dirPath);
+    if (!this.resolvedAllowedPaths.includes(resolved)) {
+      this.resolvedAllowedPaths.push(resolved);
+      this.allowedPathsConfig.customAllowedPaths.push(dirPath);
+      console.log('📁 FileController - Adicionado diretório permitido:', resolved);
+    }
+  }
+
+  /**
+   * Valida se um caminho está dentro dos diretórios permitidos
+   * Proteção contra Path Traversal (ex: ../../etc/passwd)
+   */
+  private validatePath(filePath: string, operation: string): string {
+    const resolvedPath = path.resolve(filePath);
+    
+    // Verificar se o caminho resolvido está dentro de algum diretório permitido
+    const isAllowed = this.resolvedAllowedPaths.some(allowedPath => {
+      // Normalizar para comparação (Windows: case-insensitive)
+      const normalizedAllowed = allowedPath.toLowerCase();
+      const normalizedResolved = resolvedPath.toLowerCase();
+      
+      // Verificar se é exatamente o diretório ou está dentro dele
+      return normalizedResolved === normalizedAllowed || 
+             normalizedResolved.startsWith(normalizedAllowed + path.sep);
+    });
+
+    if (!isAllowed) {
+      const errorMsg = `🚫 ACESSO NEGADO (Path Traversal): ${operation} - Caminho "${resolvedPath}" não está em diretórios permitidos`;
+      console.error(errorMsg);
+      console.error('📁 Diretórios permitidos:', this.resolvedAllowedPaths);
+      throw new Error(`Acesso negado: operação "${operation}" não permitida fora dos diretórios autorizados`);
+    }
+
+    return resolvedPath;
+  }
+
   /**
    * Lê o conteúdo de um arquivo
    */
   async readFile(filePath: string): Promise<string> {
     try {
-      const resolvedPath = path.resolve(filePath);
-      return await fs.promises.readFile(resolvedPath, 'utf-8');
+      const safePath = this.validatePath(filePath, 'readFile');
+      return await fs.promises.readFile(safePath, 'utf-8');
     } catch (error) {
       console.error('Erro ao ler arquivo:', error);
       throw error;
@@ -34,8 +149,8 @@ export class FileController {
    */
   async readFileBuffer(filePath: string): Promise<Buffer> {
     try {
-      const resolvedPath = path.resolve(filePath);
-      return await fs.promises.readFile(resolvedPath);
+      const safePath = this.validatePath(filePath, 'readFileBuffer');
+      return await fs.promises.readFile(safePath);
     } catch (error) {
       console.error('Erro ao ler arquivo binário:', error);
       throw error;
@@ -47,13 +162,13 @@ export class FileController {
    */
   async writeFile(filePath: string, content: string): Promise<void> {
     try {
-      const resolvedPath = path.resolve(filePath);
-      const dir = path.dirname(resolvedPath);
+      const safePath = this.validatePath(filePath, 'writeFile');
+      const dir = path.dirname(safePath);
       
       // Criar diretório se não existir
       await fs.promises.mkdir(dir, { recursive: true });
       
-      await fs.promises.writeFile(resolvedPath, content, 'utf-8');
+      await fs.promises.writeFile(safePath, content, 'utf-8');
     } catch (error) {
       console.error('Erro ao escrever arquivo:', error);
       throw error;
@@ -65,8 +180,8 @@ export class FileController {
    */
   async appendFile(filePath: string, content: string): Promise<void> {
     try {
-      const resolvedPath = path.resolve(filePath);
-      await fs.promises.appendFile(resolvedPath, content, 'utf-8');
+      const safePath = this.validatePath(filePath, 'appendFile');
+      await fs.promises.appendFile(safePath, content, 'utf-8');
     } catch (error) {
       console.error('Erro ao anexar ao arquivo:', error);
       throw error;
@@ -130,8 +245,8 @@ export class FileController {
    */
   async createDirectory(dirPath: string): Promise<void> {
     try {
-      const resolvedPath = path.resolve(dirPath);
-      await fs.promises.mkdir(resolvedPath, { recursive: true });
+      const safePath = this.validatePath(dirPath, 'createDirectory');
+      await fs.promises.mkdir(safePath, { recursive: true });
     } catch (error) {
       console.error('Erro ao criar diretório:', error);
       throw error;
@@ -143,8 +258,8 @@ export class FileController {
    */
   async deleteFile(filePath: string): Promise<void> {
     try {
-      const resolvedPath = path.resolve(filePath);
-      await fs.promises.unlink(resolvedPath);
+      const safePath = this.validatePath(filePath, 'deleteFile');
+      await fs.promises.unlink(safePath);
     } catch (error) {
       console.error('Erro ao deletar arquivo:', error);
       throw error;
@@ -156,8 +271,8 @@ export class FileController {
    */
   async deleteDirectory(dirPath: string, recursive: boolean = false): Promise<void> {
     try {
-      const resolvedPath = path.resolve(dirPath);
-      await fs.promises.rm(resolvedPath, { recursive, force: true });
+      const safePath = this.validatePath(dirPath, 'deleteDirectory');
+      await fs.promises.rm(safePath, { recursive, force: true });
     } catch (error) {
       console.error('Erro ao deletar diretório:', error);
       throw error;
@@ -169,9 +284,9 @@ export class FileController {
    */
   async rename(oldPath: string, newPath: string): Promise<void> {
     try {
-      const resolvedOldPath = path.resolve(oldPath);
-      const resolvedNewPath = path.resolve(newPath);
-      await fs.promises.rename(resolvedOldPath, resolvedNewPath);
+      const safeOldPath = this.validatePath(oldPath, 'rename (source)');
+      const safeNewPath = this.validatePath(newPath, 'rename (dest)');
+      await fs.promises.rename(safeOldPath, safeNewPath);
     } catch (error) {
       console.error('Erro ao renomear:', error);
       throw error;
@@ -183,13 +298,13 @@ export class FileController {
    */
   async copyFile(sourcePath: string, destPath: string): Promise<void> {
     try {
-      const resolvedSource = path.resolve(sourcePath);
-      const resolvedDest = path.resolve(destPath);
+      const safeSource = this.validatePath(sourcePath, 'copyFile (source)');
+      const safeDest = this.validatePath(destPath, 'copyFile (dest)');
       
       // Criar diretório de destino se não existir
-      await fs.promises.mkdir(path.dirname(resolvedDest), { recursive: true });
+      await fs.promises.mkdir(path.dirname(safeDest), { recursive: true });
       
-      await fs.promises.copyFile(resolvedSource, resolvedDest);
+      await fs.promises.copyFile(safeSource, safeDest);
     } catch (error) {
       console.error('Erro ao copiar arquivo:', error);
       throw error;
@@ -201,13 +316,13 @@ export class FileController {
    */
   async listDirectory(dirPath: string): Promise<FileInfo[]> {
     try {
-      const resolvedPath = path.resolve(dirPath);
-      const entries = await fs.promises.readdir(resolvedPath, { withFileTypes: true });
+      const safePath = this.validatePath(dirPath, 'listDirectory');
+      const entries = await fs.promises.readdir(safePath, { withFileTypes: true });
       
       const fileInfos: FileInfo[] = [];
       
       for (const entry of entries) {
-        const fullPath = path.join(resolvedPath, entry.name);
+        const fullPath = path.join(safePath, entry.name);
         const stats = await fs.promises.stat(fullPath);
         
         fileInfos.push({
@@ -232,8 +347,8 @@ export class FileController {
    */
   async fileExists(filePath: string): Promise<boolean> {
     try {
-      const resolvedPath = path.resolve(filePath);
-      await fs.promises.access(resolvedPath);
+      const safePath = this.validatePath(filePath, 'fileExists');
+      await fs.promises.access(safePath);
       return true;
     } catch {
       return false;
@@ -245,7 +360,7 @@ export class FileController {
    */
   async searchFiles(dirPath: string, pattern: string): Promise<string[]> {
     try {
-      const resolvedPath = path.resolve(dirPath);
+      const safePath = this.validatePath(dirPath, 'searchFiles');
       const results: string[] = [];
       
       const search = async (currentPath: string) => {
@@ -262,7 +377,7 @@ export class FileController {
         }
       };
       
-      await search(resolvedPath);
+      await search(safePath);
       return results;
     } catch (error) {
       console.error('Erro ao buscar arquivos:', error);
@@ -310,6 +425,8 @@ export class FileController {
     const results: Array<{ file: string; line: number; content: string }> = [];
     
     try {
+      const safePath = this.validatePath(dirPath, 'searchInFiles');
+      
       const search = async (currentPath: string) => {
         const entries = await fs.promises.readdir(currentPath, { withFileTypes: true });
         
@@ -339,7 +456,7 @@ export class FileController {
         }
       };
       
-      await search(dirPath);
+      await search(safePath);
     } catch (error) {
       console.error('Erro ao buscar em arquivos:', error);
     }
@@ -359,8 +476,8 @@ export class FileController {
     isDirectory: boolean;
   }> {
     try {
-      const resolvedPath = path.resolve(filePath);
-      const stats = await fs.promises.stat(resolvedPath);
+      const safePath = this.validatePath(filePath, 'getFileStats');
+      const stats = await fs.promises.stat(safePath);
       
       return {
         size: stats.size,
@@ -381,8 +498,8 @@ export class FileController {
    */
   async openInExplorer(dirPath: string): Promise<void> {
     try {
-      const resolvedPath = path.resolve(dirPath);
-      await execAsync(`explorer.exe "${resolvedPath}"`);
+      const safePath = this.validatePath(dirPath, 'openInExplorer');
+      await execAsync(`explorer.exe "${safePath}"`);
     } catch (error) {
       console.error('Erro ao abrir Explorer:', error);
       throw error;
@@ -394,8 +511,8 @@ export class FileController {
    */
   async executeFile(filePath: string): Promise<void> {
     try {
-      const resolvedPath = path.resolve(filePath);
-      spawn(`"${resolvedPath}"`, [], { shell: true, detached: true });
+      const safePath = this.validatePath(filePath, 'executeFile');
+      spawn(`"${safePath}"`, [], { shell: true, detached: true });
     } catch (error) {
       console.error('Erro ao executar arquivo:', error);
       throw error;

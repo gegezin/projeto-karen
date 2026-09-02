@@ -55,6 +55,7 @@ body {
 
 /* ============ HEADER (deck-bar) ============ */
 .deck-bar {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 16px;
@@ -108,6 +109,38 @@ body {
 
 .readout-sep { color: var(--ink-faint); }
 .readout-model { color: var(--ink-dim); }
+
+.model-picker {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--ink-faint);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  -webkit-app-region: no-drag;
+}
+
+.model-picker select {
+  max-width: 150px;
+  padding: 5px 7px;
+  background: var(--panel-3);
+  border: 1px solid var(--stroke);
+  border-radius: 5px;
+  color: var(--ink-dim);
+  font: inherit;
+  text-transform: none;
+  cursor: pointer;
+}
+
+.model-picker select:focus {
+  outline: 1px solid var(--karen);
+  color: var(--ink);
+}
 
 @keyframes breathe {
   0%, 100% { opacity: 1; }
@@ -264,6 +297,37 @@ body {
   padding-left: 14px;
 }
 
+.entry-body a {
+  color: var(--system);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+}
+
+.entry-body a:hover { color: var(--ink); }
+
+.message-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.message-action {
+  padding: 4px 8px;
+  background: transparent;
+  border: 1px solid var(--stroke);
+  border-radius: 5px;
+  color: var(--ink-dim);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.message-action:hover {
+  color: var(--ink);
+  border-color: var(--karen);
+}
+
 .entry-time {
   font-family: var(--font-mono);
   font-size: 10px;
@@ -324,6 +388,43 @@ body {
 @keyframes dotPulse {
   0%, 60%, 100% { opacity: 0.25; transform: scale(0.85); }
   30% { opacity: 1; transform: scale(1); }
+}
+
+@media (max-width: 620px) {
+  .deck-bar:first-child {
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  .readout {
+    max-width: 86px;
+    padding: 5px 7px;
+  }
+
+  .readout-model,
+  .readout-sep {
+    display: none;
+  }
+
+  .model-picker span {
+    display: none;
+  }
+
+  .model-picker select {
+    width: 118px;
+    max-width: 118px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .win-controls {
+    gap: 0;
+  }
+
+  .win-btn {
+    width: 25px;
+    height: 28px;
+  }
 }
 
 /* ============ COMMAND DECK (input) ============ */

@@ -11,6 +11,7 @@ interface AppConfig {
   apiKey?: string;
   theme?: string;
   voiceEnabled?: boolean;
+  modelName?: string;
   lastUpdate?: string;
 }
 
