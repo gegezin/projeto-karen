@@ -1,6 +1,8 @@
 import { PermissionManager } from '../permissions/permissionManager';
 import { SystemAutomation } from '../automation/systemAutomation';
 import { SpotifyManager } from '../integrations/spotify/spotifyManager';
+import { CalendarManager } from '../integrations/calendar/calendarManager';
+import { EmailManager } from '../integrations/email/emailManager';
 import { ShortcutManager } from '../integrations/shortcuts/shortcutManager';
 import { MinecraftManager } from '../integrations/minecraft/minecraftManager';
 import { FileManager } from '../integrations/file-management/fileManager';
@@ -28,6 +30,8 @@ export class KarenBrain {
   private permissionManager: PermissionManager;
   private systemAutomation: SystemAutomation;
   private spotifyManager: SpotifyManager;
+  private calendarManager?: CalendarManager;
+  private emailManager?: EmailManager;
   private shortcutManager: ShortcutManager;
   private minecraftManager: MinecraftManager;
   private fileManager: FileManager;
@@ -42,7 +46,9 @@ export class KarenBrain {
     shortcutManager?: ShortcutManager,
     minecraftManager?: MinecraftManager,
     fileManager?: FileManager,
-    screenController?: ScreenController
+    screenController?: ScreenController,
+    calendarManager?: CalendarManager,
+    emailManager?: EmailManager
   ) {
     const configuredModel = configManager.get('modelName') || process.env.OLLAMA_MODEL;
     this.modelName = KarenBrain.AVAILABLE_MODELS.some(model => model.name === configuredModel)
@@ -51,6 +57,8 @@ export class KarenBrain {
     this.permissionManager = permissionManager;
     this.systemAutomation = systemAutomation;
     this.spotifyManager = spotifyManager || new SpotifyManager('', '', '');
+    this.calendarManager = calendarManager;
+    this.emailManager = emailManager;
     this.shortcutManager = shortcutManager || new ShortcutManager(systemAutomation, this.spotifyManager);
     this.minecraftManager = minecraftManager || new MinecraftManager();
     this.fileManager = fileManager || new FileManager();
@@ -686,6 +694,67 @@ Você controla o computador do usuário através de funções:
           }
         }
       },
+      // ===== WHATSAPP (adicionado - faltava declarar, execução já existia via systemAutomation) =====
+      {
+        type: 'function',
+        function: {
+          name: 'whatsapp_start',
+          description: 'Abre o WhatsApp Web no navegador para iniciar a sessão',
+          parameters: { type: 'object', properties: {}, required: [] }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'whatsapp_send',
+          description: 'Envia uma mensagem de WhatsApp para um contato. SEMPRE peça confirmação ao usuário antes de chamar esta ferramenta',
+          parameters: {
+            type: 'object',
+            properties: {
+              contact: { type: 'string', description: 'Nome do contato ou número de telefone (com DDD)' },
+              message: { type: 'string', description: 'Texto da mensagem a enviar' }
+            },
+            required: ['contact', 'message']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'whatsapp_broadcast',
+          description: 'Envia a mesma mensagem para vários contatos. SEMPRE peça confirmação ao usuário antes de chamar esta ferramenta',
+          parameters: {
+            type: 'object',
+            properties: {
+              contacts: { type: 'array', items: { type: 'string' }, description: 'Lista de nomes ou números de telefone' },
+              message: { type: 'string', description: 'Texto da mensagem a enviar' }
+            },
+            required: ['contacts', 'message']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'whatsapp_open_chat',
+          description: 'Abre a conversa com um contato específico no WhatsApp, sem enviar mensagem',
+          parameters: {
+            type: 'object',
+            properties: {
+              contact: { type: 'string', description: 'Nome do contato ou número de telefone (com DDD)' }
+            },
+            required: ['contact']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'whatsapp_close',
+          description: 'Fecha a janela do WhatsApp Web',
+          parameters: { type: 'object', properties: {}, required: [] }
+        }
+      },
       {
         type: 'function',
         function: {
@@ -697,6 +766,114 @@ Você controla o computador do usuário através de funções:
               url: { type: 'string', description: 'A URL completa para abrir' }
             },
             required: ['url']
+          }
+        }
+      },
+      // ===== GOOGLE AGENDA =====
+      {
+        type: 'function',
+        function: {
+          name: 'calendar_authenticate',
+          description: 'Inicia a autenticação da Google Agenda e retorna o link de autorização. Use quando a Agenda não estiver autenticada.',
+          parameters: { type: 'object', properties: {}, required: [] }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'calendar_complete_auth',
+          description: 'Conclui a autenticação da Google Agenda usando o código recebido na URL de callback.',
+          parameters: {
+            type: 'object',
+            properties: { code: { type: 'string', description: 'Código code= da URL de callback' } },
+            required: ['code']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'calendar_get_today',
+          description: 'Lista os eventos da agenda de hoje',
+          parameters: { type: 'object', properties: {}, required: [] }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'calendar_create_event',
+          description: 'Cria um novo evento na Google Agenda',
+          parameters: {
+            type: 'object',
+            properties: {
+              summary: { type: 'string', description: 'Título do evento' },
+              startDateTime: { type: 'string', description: 'Data/hora de início em ISO 8601' },
+              endDateTime: { type: 'string', description: 'Data/hora de término em ISO 8601' },
+              description: { type: 'string', description: 'Descrição opcional' },
+              location: { type: 'string', description: 'Local opcional' }
+            },
+            required: ['summary', 'startDateTime', 'endDateTime']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'calendar_delete',
+          description: 'Deleta um evento da Google Agenda pelo ID. SEMPRE peça confirmação ao usuário antes de chamar esta ferramenta',
+          parameters: {
+            type: 'object',
+            properties: { eventId: { type: 'string', description: 'ID do evento a deletar' } },
+            required: ['eventId']
+          }
+        }
+      },
+      // ===== GMAIL =====
+      {
+        type: 'function',
+        function: {
+          name: 'email_authenticate',
+          description: 'Inicia a autenticação do Gmail e retorna o link de autorização. Use quando o Gmail não estiver autenticado.',
+          parameters: { type: 'object', properties: {}, required: [] }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'email_complete_auth',
+          description: 'Conclui a autenticação do Gmail usando o código recebido na URL de callback.',
+          parameters: {
+            type: 'object',
+            properties: { code: { type: 'string', description: 'Código code= da URL de callback' } },
+            required: ['code']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'email_get_unread',
+          description: 'Lista os e-mails não lidos do Gmail',
+          parameters: {
+            type: 'object',
+            properties: { maxResults: { type: 'number', description: 'Quantidade máxima de e-mails (padrão 10)' } },
+            required: []
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'email_send',
+          description: 'Envia um e-mail pelo Gmail. SEMPRE peça confirmação ao usuário antes de chamar esta ferramenta',
+          parameters: {
+            type: 'object',
+            properties: {
+              to: { type: 'string', description: 'Destinatário' },
+              subject: { type: 'string', description: 'Assunto' },
+              body: { type: 'string', description: 'Corpo do e-mail' }
+            },
+            required: ['to', 'subject', 'body']
           }
         }
       },
@@ -1461,6 +1638,47 @@ Você controla o computador do usuário através de funções:
                   message: authenticated ? 'Spotify autenticado com sucesso' : 'Não foi possível autenticar o Spotify'
                 };
               }
+            } else if (funcName === 'calendar_authenticate') {
+              result = this.calendarManager
+                ? { success: false, authenticated: false, message: 'Abra esta URL, autorize e envie o código após code= na URL de retorno.', authUrl: this.calendarManager.generateAuthUrl() }
+                : { success: false, error: 'Google Agenda não configurada (faltam credenciais no .env)' };
+            } else if (funcName === 'calendar_complete_auth') {
+              if (!this.calendarManager) {
+                result = { success: false, error: 'Google Agenda não configurada' };
+              } else {
+                const tokens = await this.calendarManager.getAccessToken(funcArgs.code);
+                this.calendarManager.setCredentials(tokens.access_token, tokens.refresh_token);
+                result = { success: true, authenticated: true, message: 'Google Agenda autenticada com sucesso' };
+              }
+            } else if (funcName === 'calendar_get_today') {
+              result = this.calendarManager ? await this.calendarManager.getTodayEvents() : { success: false, error: 'Não autenticado' };
+            } else if (funcName === 'calendar_create_event') {
+              const eventInput = {
+                summary: String(funcArgs.summary ?? ''),
+                startDateTime: String(funcArgs.startDateTime ?? ''),
+                endDateTime: String(funcArgs.endDateTime ?? ''),
+                description: funcArgs.description ? String(funcArgs.description) : undefined,
+                location: funcArgs.location ? String(funcArgs.location) : undefined
+              };
+              result = this.calendarManager ? await this.calendarManager.createEvent(eventInput) : { success: false, error: 'Não autenticado' };
+            } else if (funcName === 'calendar_delete') {
+              result = this.calendarManager ? await this.calendarManager.deleteEvent(funcArgs.eventId) : { success: false, error: 'Não autenticado' };
+            } else if (funcName === 'email_authenticate') {
+              result = this.emailManager
+                ? { success: false, authenticated: false, message: 'Abra esta URL, autorize e envie o código após code= na URL de retorno.', authUrl: this.emailManager.generateAuthUrl() }
+                : { success: false, error: 'Gmail não configurado (faltam credenciais no .env)' };
+            } else if (funcName === 'email_complete_auth') {
+              if (!this.emailManager) {
+                result = { success: false, error: 'Gmail não configurado' };
+              } else {
+                const tokens = await this.emailManager.getAccessToken(funcArgs.code);
+                this.emailManager.setCredentials(tokens.access_token, tokens.refresh_token);
+                result = { success: true, authenticated: true, message: 'Gmail autenticado com sucesso' };
+              }
+            } else if (funcName === 'email_get_unread') {
+              result = this.emailManager ? await this.emailManager.getUnreadEmails(funcArgs.maxResults || 10) : { success: false, error: 'Não autenticado' };
+            } else if (funcName === 'email_send') {
+              result = this.emailManager ? await this.emailManager.sendEmail(funcArgs.to, funcArgs.subject, funcArgs.body) : { success: false, error: 'Não autenticado' };
             } else if (funcName === 'spotify_pause') {
               result = await this.spotifyManager.pause();
             } else if (funcName === 'spotify_resume') {

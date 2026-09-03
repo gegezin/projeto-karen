@@ -12,6 +12,8 @@ import { reminderController } from '../automation/reminders/reminderController';
 import { gameModeController } from '../automation/gameMode/gameModeController';
 import { KarenBrain } from '../gemini/karenbrain';
 import { SpotifyManager } from '../integrations/spotify/spotifyManager';
+import { CalendarManager } from '../integrations/calendar/calendarManager';
+import { EmailManager } from '../integrations/email/emailManager';
 import { ShortcutManager } from '../integrations/shortcuts/shortcutManager';
 import { MinecraftManager } from '../integrations/minecraft/minecraftManager';
 import { FileManager } from '../integrations/file-management/fileManager';
@@ -48,6 +50,20 @@ class IADesktopAssistant {
       spotifyClientSecret,
       spotifyRedirectUri
     );
+
+    const googleClientId = process.env.GOOGLE_CLIENT_ID || '';
+    const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET || '';
+    const googleRedirectUri = process.env.GOOGLE_REDIRECT_URI || 'http://127.0.0.1:8888/callback';
+
+    if (!googleClientId || !googleClientSecret) {
+      console.warn(
+        '⚠️ GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET não encontrados no .env. ' +
+        'Gmail e Google Agenda ficarão indisponíveis até você configurá-los.'
+      );
+    }
+
+    const calendarManager = new CalendarManager(googleClientId, googleClientSecret, googleRedirectUri);
+    const emailManager = new EmailManager(googleClientId, googleClientSecret, googleRedirectUri);
     const shortcutManager = new ShortcutManager(this.systemAutomation, this.spotifyManager);
     const minecraftManager = new MinecraftManager();
     const fileManager = new FileManager();
@@ -60,7 +76,9 @@ class IADesktopAssistant {
       shortcutManager,
       minecraftManager,
       fileManager,
-      screenController
+      screenController,
+      calendarManager,
+      emailManager
     );
     this.karenBrain.initialize();
     this.init();

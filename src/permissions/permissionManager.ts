@@ -23,7 +23,11 @@ export class PermissionManager {
     'file_delete',
     'file_delete_directory',
     'whatsapp_send',
-    'whatsapp_broadcast'
+    'whatsapp_broadcast',
+    'system_execute_cmd',
+    'system_execute_powershell',
+    'email_send',
+    'calendar_delete'
   ];
 
   // Ações que podem ser permitidas automaticamente
@@ -37,10 +41,10 @@ export class PermissionManager {
     'file_exists',
     'file_list_directory',
     'screen_capture',
-    'screen_capture_window',
-    // Permitir fechar aplicativos sem confirmação
-    'process_kill',
-    'process_kill_by_name'
+    'screen_capture_window'
+    // process_kill e process_kill_by_name saíram do auto-allow: rodando com
+    // amigos, a Karen encerrar um processo sem perguntar pode surpreender
+    // quem não é o dono original do projeto.
   ];
 
   constructor() {
