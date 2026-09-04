@@ -18,6 +18,8 @@ import { ShortcutManager } from '../integrations/shortcuts/shortcutManager';
 import { MinecraftManager } from '../integrations/minecraft/minecraftManager';
 import { FileManager } from '../integrations/file-management/fileManager';
 import { ScreenController } from '../automation/screen/screenController';
+import { TtsController } from '../voice/ttsController';
+import { SttController } from '../voice/sttController';
 
 class IADesktopAssistant {
   private mainWindow: BrowserWindow | null = null;
@@ -26,6 +28,8 @@ class IADesktopAssistant {
   private permissionManager: PermissionManager;
   private systemAutomation: SystemAutomation;
   private spotifyManager: SpotifyManager;
+  private ttsController: TtsController;
+  private sttController: SttController;
   private isQuitting = false;
   private voiceActive = false;
   private globalShortcutEnabled = true;
@@ -68,6 +72,8 @@ class IADesktopAssistant {
     const minecraftManager = new MinecraftManager();
     const fileManager = new FileManager();
     const screenController = new ScreenController();
+    this.ttsController = new TtsController();
+    this.sttController = new SttController();
     
     this.karenBrain = new KarenBrain(
       this.permissionManager, 
@@ -464,8 +470,24 @@ class IADesktopAssistant {
       return nextState;
     });
 
+    ipcMain.handle('tts-speak', async (_event, text: string) => {
+      try {
+        await this.ttsController.speak(text);
+        return { success: true };
+      } catch (error: any) {
+        return { success: false, error: error.message };
+      }
+    });
 
-    // Handlers de voz removidos - funções não implementadas
+    ipcMain.handle('tts-stop', async () => {
+      this.ttsController.stop();
+      return { success: true };
+    });
+
+    ipcMain.handle('stt-transcribe', async (_event, audioData: ArrayBuffer) => {
+      const buffer = Buffer.from(audioData);
+      return await this.sttController.transcribe(buffer);
+    });
 
     // Spotify Authentication
     ipcMain.handle('spotify-generate-auth-url', () => {

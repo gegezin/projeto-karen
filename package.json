@@ -15,10 +15,10 @@
     "cmake-js": "^8.0.0",
     "dotenv": "^16.4.5",
     "googleapis": "^171.4.0",
+    "node-edge-tts": "^1.2.10",
     "node-speech": "^1.0.5",
     "ollama": "^0.6.3",
     "pdf-lib": "^1.17.1",
-    "say": "^0.16.0",
     "screenshot-desktop": "^1.15.4",
     "spotify-web-api-node": "^5.0.2",
     "uuid": "^14.0.0"

@@ -15,6 +15,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   toggleFullscreen: () => ipcRenderer.invoke('toggle-fullscreen'),
   onFullscreenStateChanged: (callback: (fullscreen: boolean) => void) =>
     ipcRenderer.on('fullscreen-state-changed', (_event, fullscreen) => callback(fullscreen)),
+  speak: (text: string) => ipcRenderer.invoke('tts-speak', text),
+  stopSpeaking: () => ipcRenderer.invoke('tts-stop'),
+  transcribeAudio: (audioData: ArrayBuffer) => ipcRenderer.invoke('stt-transcribe', audioData),
   getAvailableModels: () => ipcRenderer.invoke('get-available-models'),
   setKarenModel: (modelName: string) => ipcRenderer.invoke('set-karen-model', modelName),
   

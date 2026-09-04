@@ -9,10 +9,14 @@ interface Message {
 
 class AppState {
   isLoading = false;
+  ttsEnabled = false;
   messages: Array<Message> = [];
 }
 
 const state = new AppState();
+let mediaRecorder: MediaRecorder | null = null;
+let audioChunks: Blob[] = [];
+let isRecording = false;
 
 function getElectronAPI(): any {
   const api = (window as any).electronAPI;
@@ -31,10 +35,12 @@ let el: {
   welcomeMessage: HTMLElement | null;
   messageInput: HTMLTextAreaElement | null;
   btnSend: HTMLButtonElement | null;
+  btnMic: HTMLButtonElement | null;
   btnScreenshot: HTMLButtonElement | null;
   btnClear: HTMLButtonElement | null;
   btnMinimize: HTMLButtonElement | null;
   btnClose: HTMLButtonElement | null;
+  btnTtsToggle: HTMLButtonElement | null;
   btnAlwaysOnTop: HTMLButtonElement | null;
   btnFullscreen: HTMLButtonElement | null;
   statusDot: HTMLElement | null;
@@ -51,10 +57,12 @@ function bindElements(): void {
     welcomeMessage: document.getElementById('welcome-message'),
     messageInput: document.getElementById('message-input') as HTMLTextAreaElement,
     btnSend: document.getElementById('btn-send') as HTMLButtonElement,
+    btnMic: document.getElementById('btn-mic') as HTMLButtonElement,
     btnScreenshot: document.getElementById('btn-screenshot') as HTMLButtonElement,
     btnClear: document.getElementById('btn-clear') as HTMLButtonElement,
     btnMinimize: document.getElementById('btn-minimize') as HTMLButtonElement,
     btnClose: document.getElementById('btn-close') as HTMLButtonElement,
+    btnTtsToggle: document.getElementById('btn-tts-toggle') as HTMLButtonElement,
     btnAlwaysOnTop: document.getElementById('btn-always-on-top') as HTMLButtonElement,
     btnFullscreen: document.getElementById('btn-fullscreen') as HTMLButtonElement,
     statusDot: document.getElementById('status-dot'),
@@ -86,8 +94,17 @@ function setupEventListeners(): void {
   el.messageInput?.addEventListener('keydown', handleInputKeydown);
   el.messageInput?.addEventListener('paste', handlePaste);
   el.btnSend?.addEventListener('click', sendMessage);
+  el.btnMic?.addEventListener('click', toggleRecording);
   el.btnScreenshot?.addEventListener('click', attachScreenshot);
   el.btnClear?.addEventListener('click', clearChat);
+  el.btnTtsToggle?.addEventListener('click', () => {
+    state.ttsEnabled = !state.ttsEnabled;
+    el.btnTtsToggle?.classList.toggle('active', state.ttsEnabled);
+    if (!state.ttsEnabled) {
+      getElectronAPI()?.stopSpeaking?.();
+    }
+    showToast(state.ttsEnabled ? '🔊 Karen vai falar as respostas' : '🔇 Voz desativada');
+  });
 
   el.btnMinimize?.addEventListener('click', () => getElectronAPI()?.minimizeWindow());
   el.btnClose?.addEventListener('click', () => getElectronAPI()?.hideWindow());
@@ -126,6 +143,52 @@ function updateFullscreenButton(fullscreen: boolean): void {
   el.btnFullscreen?.classList.toggle('active', fullscreen);
   el.btnFullscreen?.setAttribute('aria-label', fullscreen ? 'Sair da tela cheia' : 'Tela cheia');
   el.btnFullscreen?.setAttribute('title', fullscreen ? 'Sair da tela cheia' : 'Tela cheia');
+}
+
+async function toggleRecording(): Promise<void> {
+  if (isRecording) {
+    mediaRecorder?.stop();
+    return;
+  }
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRecorder = new MediaRecorder(stream);
+    audioChunks = [];
+
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) audioChunks.push(e.data);
+    };
+
+    mediaRecorder.onstop = async () => {
+      isRecording = false;
+      el.btnMic?.classList.remove('recording');
+      stream.getTracks().forEach(track => track.stop());
+
+      const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+      const arrayBuffer = await audioBlob.arrayBuffer();
+
+      showToast('🎙️ Transcrevendo...');
+      const result = await getElectronAPI()?.transcribeAudio?.(arrayBuffer);
+
+      if (result?.success && result.text) {
+        if (el.messageInput) {
+          el.messageInput.value = result.text;
+          updateSendButton();
+          el.messageInput.focus();
+        }
+      } else {
+        showToast(`⚠️ ${result?.error || 'Não consegui entender o áudio'}`);
+      }
+    };
+
+    mediaRecorder.start();
+    isRecording = true;
+    el.btnMic?.classList.add('recording');
+    showToast('🎙️ Gravando... clique de novo para parar');
+  } catch (error) {
+    showToast('❌ Não consegui acessar o microfone');
+  }
 }
 
 async function setupModelPicker(): Promise<void> {
@@ -318,6 +381,19 @@ function addMessage(role: 'user' | 'assistant', content: string, imageData?: str
   body.appendChild(textEl);
 
   if (role === 'assistant') {
+    if (state.ttsEnabled) {
+      getElectronAPI()?.speak?.(content).then((result: any) => {
+        if (result?.success && result.audioDataUrl) {
+          const audio = new Audio(result.audioDataUrl);
+          audio.play().catch(() => {
+            showToast('⚠️ Não consegui reproduzir o áudio');
+          });
+        } else if (result?.error) {
+          showToast(`⚠️ Erro na voz: ${result.error}`);
+        }
+      });
+    }
+
     const actions = document.createElement('div');
     actions.className = 'message-actions';
 

@@ -490,6 +490,15 @@ body {
   transition: background 0.15s, color 0.15s;
 }
 .tool-btn:hover { background: var(--panel-3); color: var(--ink); }
+.tool-btn.recording {
+  color: var(--danger);
+  animation: recPulse 1s ease-in-out infinite;
+}
+
+@keyframes recPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
 
 .send-btn {
   width: 30px;

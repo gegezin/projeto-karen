@@ -1,17 +1,5 @@
 [
   {
-    "content": "Usuário: legal, está funcionando, consegue tocar a musica sagrado profano da luiza sonza ?\nKaren: ",
-    "timestamp": 1779321413662
-  },
-  {
-    "content": "Usuário: karen, que musica está tocando agora ??\nKaren: [BLOCO] Opa, deu bom! O Spotify tá tocando \"Sagrado Profano\" da Luísa Sonza feat. KayBlack, do álbum Escândalo Íntimo. 🎶  \n[BLOCO] A faixa tem uns 3 minutos e 16 segundos (196601 ms) e está rolendo bem agora.  \n[BLOCO] Gostou da vibe? Se quiser que eu pause, pule pra próxima ou ponha outra música/playlist, é só falar! 😊  \n[BLOCO] Precisa de mais alguma coisa com o Spotify ou com qualquer outra tarefa? Tô aqui pra ajudar! 💪",
-    "timestamp": 1779321529879
-  },
-  {
-    "content": "Usuário: pula a musica por favor\nKaren: ",
-    "timestamp": 1779321549719
-  },
-  {
     "content": "Usuário: karen, abre o spotify\nKaren: [BLOCO] Beleza! Abri o Spotify pra você agora mesmo. 🎵  \n[BLOCO] O programa já está rodando, então você pode controlar a música normalmente ou me pedir pra tocar alguma faixa específica.  \n[BLOCO] Quer que eu coloque alguma música, playlist ou deixar o volume no ponto? É só falar! 😊  \n[BLOCO] Precisa de ajuda com mais alguma coisa no computador ou com outras tarefas? Tô aqui! 💪",
     "timestamp": 1779325328502
   },
@@ -398,5 +386,17 @@
   {
     "content": "Usuário: apenas um teste\nKaren: Teste recebido. Tudo certo por aqui, bora pra próxima!",
     "timestamp": 1788380399935
+  },
+  {
+    "content": "Usuário: olá karen, tudo bem\nKaren: Tudo ótimo por aqui! O que manda?",
+    "timestamp": 1788436576785
+  },
+  {
+    "content": "Usuário: abre o youtube no opera no canal do vinicius 13\nKaren: Prontinho, Opera aberto no canal do Vinicius 13.",
+    "timestamp": 1788436613624
+  },
+  {
+    "content": "Usuário: Oi karen, tudo bem? Voc� pode abrir o whatsapp pra mim, por favor ?\nKaren: Prontinho, o WhatsApp já deve estar aberto.",
+    "timestamp": 1788457788535
   }
 ]
