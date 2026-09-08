@@ -20,6 +20,7 @@ import { FileManager } from '../integrations/file-management/fileManager';
 import { ScreenController } from '../automation/screen/screenController';
 import { TtsController } from '../voice/ttsController';
 import { SttController } from '../voice/sttController';
+import { FileConversionController } from '../conversion/fileConversionController';
 
 class IADesktopAssistant {
   private mainWindow: BrowserWindow | null = null;
@@ -74,6 +75,7 @@ class IADesktopAssistant {
     const screenController = new ScreenController();
     this.ttsController = new TtsController();
     this.sttController = new SttController();
+    const fileConversionController = new FileConversionController();
     
     this.karenBrain = new KarenBrain(
       this.permissionManager, 
@@ -84,7 +86,8 @@ class IADesktopAssistant {
       fileManager,
       screenController,
       calendarManager,
-      emailManager
+      emailManager,
+      fileConversionController
     );
     this.karenBrain.initialize();
     this.init();

@@ -38,7 +38,17 @@ MODEL_SIZE = os.environ.get('WHISPER_MODEL_SIZE', 'small')
 
 try:
     model = WhisperModel(MODEL_SIZE, device='cpu', compute_type='int8')
-    segments, info = model.transcribe(audio_path, language='pt', beam_size=5)
+    # Contexto inicial para favorecer nomes próprios e vocabulário da Karen.
+    initial_prompt = os.environ.get(
+        'WHISPER_INITIAL_PROMPT',
+        'Karen, assistente pessoal, abrir, arquivo, aplicativo, WhatsApp, e-mail, agenda.'
+    )
+    segments, info = model.transcribe(
+        audio_path,
+        language='pt',
+        beam_size=5,
+        initial_prompt=initial_prompt,
+    )
     transcript = ' '.join(segment.text.strip() for segment in segments).strip()
 
     if not transcript:

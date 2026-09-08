@@ -145,6 +145,11 @@ function updateFullscreenButton(fullscreen: boolean): void {
   el.btnFullscreen?.setAttribute('title', fullscreen ? 'Sair da tela cheia' : 'Tela cheia');
 }
 
+function setOrbState(orbState: 'idle' | 'listening' | 'thinking' | 'speaking'): void {
+  const orb = document.getElementById('karen-orb');
+  orb?.setAttribute('data-state', orbState);
+}
+
 async function toggleRecording(): Promise<void> {
   if (isRecording) {
     mediaRecorder?.stop();
@@ -152,7 +157,14 @@ async function toggleRecording(): Promise<void> {
   }
 
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        sampleRate: 16000,
+      },
+    });
     mediaRecorder = new MediaRecorder(stream);
     audioChunks = [];
 
@@ -162,6 +174,7 @@ async function toggleRecording(): Promise<void> {
 
     mediaRecorder.onstop = async () => {
       isRecording = false;
+      setOrbState('idle');
       el.btnMic?.classList.remove('recording');
       stream.getTracks().forEach(track => track.stop());
 
@@ -184,6 +197,7 @@ async function toggleRecording(): Promise<void> {
 
     mediaRecorder.start();
     isRecording = true;
+    setOrbState('listening');
     el.btnMic?.classList.add('recording');
     showToast('🎙️ Gravando... clique de novo para parar');
   } catch (error) {
@@ -273,8 +287,10 @@ function setLoading(loading: boolean): void {
   state.isLoading = loading;
   if (loading) {
     showThinkingIndicator();
+    setOrbState('thinking');
   } else {
     hideThinkingIndicator();
+    setOrbState('idle');
   }
   updateSendButton();
 }
@@ -385,7 +401,11 @@ function addMessage(role: 'user' | 'assistant', content: string, imageData?: str
       getElectronAPI()?.speak?.(content).then((result: any) => {
         if (result?.success && result.audioDataUrl) {
           const audio = new Audio(result.audioDataUrl);
+          setOrbState('speaking');
+          audio.addEventListener('ended', () => setOrbState('idle'));
+          audio.addEventListener('error', () => setOrbState('idle'));
           audio.play().catch(() => {
+            setOrbState('idle');
             showToast('⚠️ Não consegui reproduzir o áudio');
           });
         } else if (result?.error) {

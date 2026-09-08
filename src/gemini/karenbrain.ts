@@ -13,6 +13,7 @@ import { webIntegrationController } from '../automation/web/webIntegrationContro
 import { conversationHistory } from '../conversation/conversationHistory';
 import { deepResearchAgent } from '../integrations/deep-research/deepResearchAgent';
 import { configManager } from '../config/configManager';
+import { FileConversionController } from '../conversion/fileConversionController';
 import ollama from 'ollama';
 
 export class KarenBrain {
@@ -32,6 +33,7 @@ export class KarenBrain {
   private spotifyManager: SpotifyManager;
   private calendarManager?: CalendarManager;
   private emailManager?: EmailManager;
+  private fileConversionController: FileConversionController;
   private shortcutManager: ShortcutManager;
   private minecraftManager: MinecraftManager;
   private fileManager: FileManager;
@@ -48,7 +50,8 @@ export class KarenBrain {
     fileManager?: FileManager,
     screenController?: ScreenController,
     calendarManager?: CalendarManager,
-    emailManager?: EmailManager
+    emailManager?: EmailManager,
+    fileConversionController?: FileConversionController
   ) {
     const configuredModel = configManager.get('modelName') || process.env.OLLAMA_MODEL;
     this.modelName = KarenBrain.AVAILABLE_MODELS.some(model => model.name === configuredModel)
@@ -59,6 +62,7 @@ export class KarenBrain {
     this.spotifyManager = spotifyManager || new SpotifyManager('', '', '');
     this.calendarManager = calendarManager;
     this.emailManager = emailManager;
+    this.fileConversionController = fileConversionController || new FileConversionController();
     this.shortcutManager = shortcutManager || new ShortcutManager(systemAutomation, this.spotifyManager);
     this.minecraftManager = minecraftManager || new MinecraftManager();
     this.fileManager = fileManager || new FileManager();
@@ -1154,6 +1158,22 @@ Você controla o computador do usuário através de funções:
       {
         type: 'function',
         function: {
+          name: 'file_convert_format',
+          description: 'Converte um arquivo para outro formato dentro da mesma categoria: imagens, documentos/texto, planilhas e arquivos compactados. Detecta a categoria automaticamente pela extensão.',
+          parameters: {
+            type: 'object',
+            properties: {
+              inputPath: { type: 'string', description: 'Caminho completo do arquivo de origem' },
+              targetFormat: { type: 'string', description: 'Extensão de destino, sem ponto. Ex: ico, docx, xlsx ou 7z' },
+              outputPath: { type: 'string', description: 'Caminho completo de destino opcional' }
+            },
+            required: ['inputPath', 'targetFormat']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
           name: 'reminder_create',
           description: 'Cria um novo lembrete',
           parameters: {
@@ -1752,6 +1772,14 @@ Você controla o computador do usuário através de funções:
               result = this.fileManager.organizeByType(funcArgs.sourceDir, funcArgs.targetDir);
             } else if (funcName === 'file_delete_duplicates') {
               result = this.fileManager.deleteDuplicates(funcArgs.dirPath);
+            }
+            // Executar conversões universais de arquivos
+            else if (funcName === 'file_convert_format') {
+              result = await this.fileConversionController.convert(
+                funcArgs.inputPath,
+                funcArgs.targetFormat,
+                funcArgs.outputPath
+              );
             }
             // Executar ferramentas de Reminder
             else if (funcName === 'reminder_create') {
