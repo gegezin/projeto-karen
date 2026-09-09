@@ -8,6 +8,7 @@ import * as os from 'os';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { PDFParse } from 'pdf-parse';
+import { getPandocPath, getSevenZipPath } from '../main/binaryPaths';
 
 const execAsync = promisify(exec);
 
@@ -31,6 +32,7 @@ export class FileConversionController {
 
   private locateSevenZip(): void {
     const candidates = [
+      getSevenZipPath(),
       'C:\\Program Files\\7-Zip\\7z.exe',
       'C:\\Program Files (x86)\\7-Zip\\7z.exe',
       '7z'
@@ -118,7 +120,7 @@ export class FileConversionController {
   private async runPandoc(inputPath: string, outputPath: string, extraArgs: string[] = []): Promise<void> {
     const args = [`"${inputPath}"`, '-o', `"${outputPath}"`, ...extraArgs].join(' ');
     try {
-      await execAsync(`pandoc ${args}`);
+      await execAsync(`"${getPandocPath()}" ${args}`);
     } catch (error: any) {
       if (error.code === 'ENOENT' || error.message?.includes('not recognized')) {
         throw new Error('Pandoc não encontrado. Instale-o e reinicie o app.');

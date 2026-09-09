@@ -38,8 +38,14 @@
     "appId": "com.karen.assistant",
     "productName": "Karen IA Assistant",
     "win": {
-      "target": "portable",
+      "target": "nsis",
       "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
     },
     "directories": {
       "output": "release"
@@ -48,6 +54,12 @@
       "dist/**/*",
       "node_modules/**/*",
       "package.json"
+    ],
+    "extraResources": [
+      { "from": "vendor/python", "to": "python" },
+      { "from": "vendor/pandoc", "to": "pandoc" },
+      { "from": "vendor/7zip", "to": "7zip" },
+      { "from": "scripts/transcribe_whisper.py", "to": "scripts/transcribe_whisper.py" }
     ]
   }
 }

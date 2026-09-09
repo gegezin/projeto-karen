@@ -14,6 +14,7 @@ import { conversationHistory } from '../conversation/conversationHistory';
 import { deepResearchAgent } from '../integrations/deep-research/deepResearchAgent';
 import { configManager } from '../config/configManager';
 import { FileConversionController } from '../conversion/fileConversionController';
+import { OllamaAuthController } from '../integrations/ollama/ollamaAuthController';
 import ollama from 'ollama';
 
 export class KarenBrain {
@@ -27,6 +28,8 @@ export class KarenBrain {
 
   private modelName: string;
   private chatHistory: Array<any> = [];
+  private readonly MAX_HISTORY_MESSAGES = 40;
+  private readonly MAX_TOOL_RESULT_CHARS = 6000;
   private memoryContext: Array<{ content: string; timestamp: number }> = [];
   private permissionManager: PermissionManager;
   private systemAutomation: SystemAutomation;
@@ -34,6 +37,7 @@ export class KarenBrain {
   private calendarManager?: CalendarManager;
   private emailManager?: EmailManager;
   private fileConversionController: FileConversionController;
+  private ollamaAuthController: OllamaAuthController;
   private shortcutManager: ShortcutManager;
   private minecraftManager: MinecraftManager;
   private fileManager: FileManager;
@@ -51,7 +55,8 @@ export class KarenBrain {
     screenController?: ScreenController,
     calendarManager?: CalendarManager,
     emailManager?: EmailManager,
-    fileConversionController?: FileConversionController
+    fileConversionController?: FileConversionController,
+    ollamaAuthController?: OllamaAuthController
   ) {
     const configuredModel = configManager.get('modelName') || process.env.OLLAMA_MODEL;
     this.modelName = KarenBrain.AVAILABLE_MODELS.some(model => model.name === configuredModel)
@@ -63,6 +68,7 @@ export class KarenBrain {
     this.calendarManager = calendarManager;
     this.emailManager = emailManager;
     this.fileConversionController = fileConversionController || new FileConversionController();
+    this.ollamaAuthController = ollamaAuthController || new OllamaAuthController();
     this.shortcutManager = shortcutManager || new ShortcutManager(systemAutomation, this.spotifyManager);
     this.minecraftManager = minecraftManager || new MinecraftManager();
     this.fileManager = fileManager || new FileManager();
@@ -771,6 +777,14 @@ Você controla o computador do usuário através de funções:
             },
             required: ['url']
           }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'ollama_signin',
+          description: 'Conecta a Ollama à conta Ollama Cloud, abrindo o navegador automaticamente se necessário.',
+          parameters: { type: 'object', properties: {}, required: [] }
         }
       },
       // ===== GOOGLE AGENDA =====
@@ -1598,7 +1612,7 @@ Você controla o computador do usuário através de funções:
       this.chatHistory.push({ role: 'user', content: messageWithMemory });
 
       const tools = this.getFunctionDeclarations();
-      
+      this.trimHistory();
       const response = await ollama.chat({
         model: this.modelName,
         messages: this.chatHistory,
@@ -1639,14 +1653,12 @@ Você controla o computador do usuário através de funções:
                 funcName === 'system_open_url') {
               result = await this.systemAutomation.executeAction(funcName, funcArgs);
             }
+            else if (funcName === 'ollama_signin') {
+              result = await this.ollamaAuthController.signIn();
+            }
             // Executar ferramentas do Spotify
             else if (funcName === 'spotify_authenticate') {
-              result = {
-                success: false,
-                authenticated: false,
-                message: 'Autorização necessária. Abra esta URL no navegador, autorize o app e envie para a Karen o código após code= na URL de retorno.',
-                authUrl: this.spotifyManager.generateAuthUrl()
-              };
+              result = await this.spotifyManager.loginInteractive();
             } else if (funcName === 'spotify_complete_auth') {
               if (typeof funcArgs.code !== 'string' || !funcArgs.code.trim()) {
                 result = { success: false, error: 'Código de autorização vazio ou inválido' };
@@ -1660,7 +1672,7 @@ Você controla o computador do usuário através de funções:
               }
             } else if (funcName === 'calendar_authenticate') {
               result = this.calendarManager
-                ? { success: false, authenticated: false, message: 'Abra esta URL, autorize e envie o código após code= na URL de retorno.', authUrl: this.calendarManager.generateAuthUrl() }
+                ? await this.calendarManager.loginInteractive()
                 : { success: false, error: 'Google Agenda não configurada (faltam credenciais no .env)' };
             } else if (funcName === 'calendar_complete_auth') {
               if (!this.calendarManager) {
@@ -1685,7 +1697,7 @@ Você controla o computador do usuário através de funções:
               result = this.calendarManager ? await this.calendarManager.deleteEvent(funcArgs.eventId) : { success: false, error: 'Não autenticado' };
             } else if (funcName === 'email_authenticate') {
               result = this.emailManager
-                ? { success: false, authenticated: false, message: 'Abra esta URL, autorize e envie o código após code= na URL de retorno.', authUrl: this.emailManager.generateAuthUrl() }
+                ? await this.emailManager.loginInteractive()
                 : { success: false, error: 'Gmail não configurado (faltam credenciais no .env)' };
             } else if (funcName === 'email_complete_auth') {
               if (!this.emailManager) {
@@ -1858,9 +1870,10 @@ Você controla o computador do usuário através de funções:
               result = await this.systemAutomation.executeAction(funcName, funcArgs);
             }
             
+            const resultContent = typeof result === 'object' ? JSON.stringify(result) : String(result);
             this.chatHistory.push({
               role: 'tool',
-              content: typeof result === 'object' ? JSON.stringify(result) : String(result)
+              content: this.truncateToolResult(resultContent)
             });
           } catch (execError: any) {
             console.error(`Erro ao executar ${funcName}:`, execError);
@@ -1872,17 +1885,28 @@ Você controla o computador do usuário através de funções:
         }
 
         // Só após executar todas as ferramentas, chamar o modelo para gerar resposta final
+        this.trimHistory();
         const finalResponse = await ollama.chat({
           model: this.modelName,
           messages: this.chatHistory,
           think: false,
         });
 
-        const finalText = finalResponse.message.content;
-        
-        // Validar se a resposta não está vazia
+        let finalText = finalResponse.message.content;
+
         if (!finalText || finalText.trim().length === 0) {
-          console.warn('⚠️ Ollama retornou resposta vazia');
+          console.warn('⚠️ Ollama retornou resposta vazia - tentando novamente com histórico reduzido');
+          this.chatHistory = [this.chatHistory[0], ...this.chatHistory.slice(-10)];
+          const retryResponse = await ollama.chat({
+            model: this.modelName,
+            messages: this.chatHistory,
+            think: false,
+          });
+          finalText = retryResponse.message.content;
+        }
+
+        if (!finalText || finalText.trim().length === 0) {
+          console.warn('⚠️ Ollama retornou resposta vazia mesmo após retry');
           return 'Desculpe, não consegui gerar uma resposta. Por favor, tente novamente.';
         }
         
@@ -1896,11 +1920,23 @@ Você controla o computador do usuário através de funções:
       }
 
       const responseText = messageResponse.content;
-      
-      // Validar se a resposta não está vazia
+
       if (!responseText || responseText.trim().length === 0) {
-        console.warn('⚠️ Ollama retornou resposta vazia (sem tool calls)');
-        return 'Desculpe, não consegui gerar uma resposta. Por favor, tente novamente.';
+        console.warn('⚠️ Ollama retornou resposta vazia (sem tool calls) - tentando novamente com histórico reduzido');
+        this.chatHistory = [this.chatHistory[0], ...this.chatHistory.slice(-10)];
+        const retryResponse = await ollama.chat({
+          model: this.modelName,
+          messages: this.chatHistory,
+          think: false,
+        });
+        const retryText = retryResponse.message.content;
+        if (!retryText || retryText.trim().length === 0) {
+          console.warn('⚠️ Ollama retornou resposta vazia mesmo após retry');
+          return 'Desculpe, não consegui gerar uma resposta. Por favor, tente novamente.';
+        }
+        this.chatHistory.push({ role: 'assistant', content: retryText });
+        await this.addToMemory(`Usuário: ${message}\nKaren: ${retryText}`);
+        return this.splitIntoBlocks(retryText);
       }
       
       this.chatHistory.push({ role: 'assistant', content: responseText });
@@ -1914,6 +1950,11 @@ Você controla o computador do usuário através de funções:
     } catch (error: any) {
       console.error('[KarenBrain] Error:', error);
       this.isOnline = false;
+
+      const errorMessage = String(error?.message || error).toLowerCase();
+      if (errorMessage.includes('sign in') || errorMessage.includes('unauthorized')) {
+        return 'Parece que a Ollama Cloud não está conectada. Me peça "conecta a Ollama Cloud" que eu resolvo isso rapidinho.';
+      }
       
       if (retryCount < MAX_RETRIES) {
         console.log(`🔄 Tentativa ${retryCount + 1}/${MAX_RETRIES} em ${RETRY_DELAY}ms...`);
@@ -1939,6 +1980,26 @@ Você controla o computador do usuário através de funções:
       
       return `Erro ao conectar com o meu cérebro (Ollama): ${error.message}. Verifique se o Ollama está rodando e o modelo está disponível.`;
     }
+  }
+
+  private trimHistory(): void {
+    if (this.chatHistory.length <= this.MAX_HISTORY_MESSAGES) {
+      return;
+    }
+
+    const systemMessage = this.chatHistory[0];
+    const recent = this.chatHistory.slice(-(this.MAX_HISTORY_MESSAGES - 1));
+    this.chatHistory = [systemMessage, ...recent];
+    console.log(`✂️ Histórico podado para ${this.chatHistory.length} mensagens`);
+  }
+
+  private truncateToolResult(content: string): string {
+    if (content.length <= this.MAX_TOOL_RESULT_CHARS) {
+      return content;
+    }
+
+    const truncated = content.slice(0, this.MAX_TOOL_RESULT_CHARS);
+    return `${truncated}\n\n[...conteúdo truncado - o resultado original tinha ${content.length} caracteres. Se precisar do restante, peça uma parte específica.]`;
   }
 
   private splitIntoBlocks(text: string): string | string[] {

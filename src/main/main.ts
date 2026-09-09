@@ -21,6 +21,8 @@ import { ScreenController } from '../automation/screen/screenController';
 import { TtsController } from '../voice/ttsController';
 import { SttController } from '../voice/sttController';
 import { FileConversionController } from '../conversion/fileConversionController';
+import { verifyBundledBinaries } from './binaryPaths';
+import { OllamaAuthController } from '../integrations/ollama/ollamaAuthController';
 
 class IADesktopAssistant {
   private mainWindow: BrowserWindow | null = null;
@@ -40,6 +42,7 @@ class IADesktopAssistant {
   constructor() {
     this.permissionManager = new PermissionManager();
     this.systemAutomation = new SystemAutomation();
+    verifyBundledBinaries();
     
     // Inicializar novos managers com credenciais de variáveis de ambiente
     const spotifyClientId = process.env.SPOTIFY_CLIENT_ID || '';
@@ -76,6 +79,7 @@ class IADesktopAssistant {
     this.ttsController = new TtsController();
     this.sttController = new SttController();
     const fileConversionController = new FileConversionController();
+    const ollamaAuthController = new OllamaAuthController();
     
     this.karenBrain = new KarenBrain(
       this.permissionManager, 
@@ -87,7 +91,8 @@ class IADesktopAssistant {
       screenController,
       calendarManager,
       emailManager,
-      fileConversionController
+      fileConversionController,
+      ollamaAuthController
     );
     this.karenBrain.initialize();
     this.init();

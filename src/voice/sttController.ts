@@ -2,13 +2,14 @@ import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { getPythonExePath, getTranscriptionScriptPath } from '../main/binaryPaths';
 
 export class SttController {
   private scriptPath: string;
-  private readonly pythonCandidates = ['python', 'python3', 'py'];
+  private readonly pythonCandidates = [getPythonExePath(), 'python', 'python3', 'py'];
 
   constructor() {
-    this.scriptPath = path.join(process.cwd(), 'scripts', 'transcribe_whisper.py');
+    this.scriptPath = getTranscriptionScriptPath();
   }
 
   /**

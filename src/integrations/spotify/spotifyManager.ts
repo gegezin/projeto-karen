@@ -7,6 +7,7 @@ import SpotifyWebApi from 'spotify-web-api-node';
 import * as fs from 'fs';
 import * as path from 'path';
 import { app } from 'electron';
+import * as crypto from 'crypto';
 
 export interface SpotifyTrack {
   name: string;
@@ -27,6 +28,7 @@ export class SpotifyManager {
   private clientId: string;
   private clientSecret: string;
   private redirectUri: string;
+  private codeVerifier = '';
   private isAuthenticated: boolean = false;
   private scopes = ['user-read-playback-state', 'user-modify-playback-state', 'user-read-currently-playing', 'playlist-read-private', 'playlist-modify-public', 'playlist-modify-private'];
   private tokenFilePath: string;
@@ -96,7 +98,18 @@ export class SpotifyManager {
    * Gera URL de autorização OAuth2
    */
   generateAuthUrl(): string {
-    const authorizeURL = this.spotifyApi.createAuthorizeURL(this.scopes, 'karen-assistant-state');
+    this.codeVerifier = crypto.randomBytes(64).toString('base64url');
+    const codeChallenge = crypto.createHash('sha256').update(this.codeVerifier).digest('base64url');
+    const params = new URLSearchParams({
+      response_type: 'code',
+      client_id: this.clientId,
+      scope: this.scopes.join(' '),
+      code_challenge_method: 'S256',
+      code_challenge: codeChallenge,
+      redirect_uri: this.redirectUri,
+      state: 'karen-assistant-state'
+    });
+    const authorizeURL = `https://accounts.spotify.com/authorize?${params.toString()}`;
     console.log('=== ASSISTENTE KAREN IA ===');
     console.log('Acesse o link abaixo no seu navegador para autorizar o app:');
     console.log(authorizeURL);
@@ -108,13 +121,28 @@ export class SpotifyManager {
    */
   async receiveAuthorizationCode(code: string): Promise<boolean> {
     try {
-      const data = await this.spotifyApi.authorizationCodeGrant(code);
-      
+      const params = new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: this.redirectUri,
+        client_id: this.clientId,
+        code_verifier: this.codeVerifier
+      });
+      const response = await fetch('https://accounts.spotify.com/api/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params.toString()
+      });
+      if (!response.ok) {
+        console.error('Erro na troca de token do Spotify:', await response.text());
+        return false;
+      }
+      const data: any = await response.json();
       console.log('Token de Acesso obtido com sucesso!');
       
       // Define os tokens no cliente do Spotify
-      const accessToken = data.body['access_token'];
-      const refreshToken = data.body['refresh_token'];
+      const accessToken = data.access_token;
+      const refreshToken = data.refresh_token;
       
       this.spotifyApi.setAccessToken(accessToken);
       this.spotifyApi.setRefreshToken(refreshToken);
@@ -136,6 +164,19 @@ export class SpotifyManager {
       console.error('Erro ao registrar o token:', error);
       return false;
     }
+  }
+
+  async loginInteractive(): Promise<{ success: boolean; error?: string }> {
+    const { shell } = require('electron');
+    const { waitForOAuthCallback } = require('../oauth/oauthCallbackServer');
+    const authUrl = this.generateAuthUrl();
+    const callbackPromise = waitForOAuthCallback(8888);
+    await shell.openExternal(authUrl);
+    const result = await callbackPromise;
+    if (result.error || !result.code) {
+      return { success: false, error: result.error || 'Código de autorização não recebido' };
+    }
+    return { success: await this.receiveAuthorizationCode(result.code) };
   }
 
   /**

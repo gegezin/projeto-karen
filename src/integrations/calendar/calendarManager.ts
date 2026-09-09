@@ -199,6 +199,27 @@ export class CalendarManager {
     const { tokens } = await this.oauth2Client.getToken(code);
     return tokens;
   }
+
+  async loginInteractive(): Promise<{ success: boolean; error?: string }> {
+    const { shell } = require('electron');
+    const { waitForOAuthCallback } = require('../oauth/oauthCallbackServer');
+    const authUrl = this.generateAuthUrl();
+    const callbackPromise = waitForOAuthCallback(8888);
+    await shell.openExternal(authUrl);
+    const result = await callbackPromise;
+
+    if (result.error || !result.code) {
+      return { success: false, error: result.error || 'Código de autorização não recebido' };
+    }
+
+    try {
+      const tokens = await this.getAccessToken(result.code);
+      this.setCredentials(tokens.access_token, tokens.refresh_token);
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
 }
 
 interface CalendarEvent {
