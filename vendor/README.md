@@ -1,9 +1,22 @@
-# Binarios redistribuiveis
+# Binários redistribuíveis
 
-Preencha estas pastas antes de executar `npm run dist` para gerar um instalador autocontido:
+Essas pastas precisam ser preenchidas antes de rodar `npm run dist`
+(gerar o instalador autocontido). Elas ficam fora do Git de propósito -
+são binários de terceiros, grandes demais pra versionar.
 
-- `python/`: Python Windows embeddable 64-bit, com `faster-whisper` instalado.
-- `pandoc/`: `pandoc.exe` standalone.
-- `7zip/`: `7za.exe` standalone console.
+## Preparação automática (recomendado)
 
-Os binarios nao sao incluidos no repositorio por causa do tamanho. Consulte `PROMPT_INSTALADOR_DEPENDENCIAS.md` para o procedimento de preparacao.
+Na raiz do projeto:
+
+```powershell
+.\scripts\setup-vendor.ps1
+```
+
+Esse script baixa e configura tudo sozinho: Python + faster-whisper,
+Pandoc, 7-Zip e o instalador da Ollama.
+
+## Preparação manual (se preferir, ou se o script falhar em algo)
+
+Consulte `PROMPT_INSTALADOR_DEPENDENCIAS.md` e
+`PROMPT_INSTALAR_OLLAMA_MODELOS.md` pra o procedimento passo a passo de
+cada binário.

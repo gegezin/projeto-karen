@@ -1099,6 +1099,78 @@ Você controla o computador do usuário através de funções:
       {
         type: 'function',
         function: {
+          name: 'spotify_top_tracks',
+          description: 'Lista as músicas mais escutadas pelo usuário no Spotify',
+          parameters: { type: 'object', properties: { timeRange: { type: 'string', enum: ['short_term', 'medium_term', 'long_term'] }, limit: { type: 'number' } }, required: [] }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'spotify_top_artists',
+          description: 'Lista os artistas mais escutados pelo usuário no Spotify',
+          parameters: { type: 'object', properties: { timeRange: { type: 'string', enum: ['short_term', 'medium_term', 'long_term'] }, limit: { type: 'number' } }, required: [] }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'spotify_create_playlist_from_top_tracks',
+          description: 'Cria uma playlist com as músicas mais escutadas pelo usuário',
+          parameters: { type: 'object', properties: { name: { type: 'string' }, timeRange: { type: 'string', enum: ['short_term', 'medium_term', 'long_term'] }, limit: { type: 'number' } }, required: ['name'] }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'spotify_recently_played',
+          description: 'Lista as músicas tocadas recentemente no Spotify',
+          parameters: { type: 'object', properties: { limit: { type: 'number' } }, required: [] }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'spotify_like_track',
+          description: 'Salva a música atual ou uma música específica na biblioteca do Spotify',
+          parameters: { type: 'object', properties: { trackUri: { type: 'string' } }, required: [] }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'spotify_set_shuffle',
+          description: 'Ativa ou desativa o modo aleatório do Spotify',
+          parameters: { type: 'object', properties: { enabled: { type: 'boolean' } }, required: ['enabled'] }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'spotify_set_repeat',
+          description: 'Define o modo de repetição do Spotify',
+          parameters: { type: 'object', properties: { mode: { type: 'string', enum: ['track', 'context', 'off'] } }, required: ['mode'] }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'spotify_follow_playlist',
+          description: 'Segue uma playlist na biblioteca do Spotify',
+          parameters: { type: 'object', properties: { playlistUri: { type: 'string' } }, required: ['playlistUri'] }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'spotify_recommendations',
+          description: 'Sugere músicas parecidas com uma música de referência',
+          parameters: { type: 'object', properties: { trackUri: { type: 'string' }, limit: { type: 'number' } }, required: ['trackUri'] }
+        }
+      },
+      {
+        type: 'function',
+        function: {
           name: 'shortcut_execute_mode',
           description: 'Executa um modo de atalho (ex: dev, gamer, relax, focus)',
           parameters: {
@@ -1764,6 +1836,24 @@ Você controla o computador do usuário através de funções:
               } else {
                 result = { success: false, error: 'Playlist não encontrada' };
               }
+            } else if (funcName === 'spotify_top_tracks') {
+              result = await this.spotifyManager.getTopTracks(funcArgs.limit || 20, funcArgs.timeRange || 'medium_term');
+            } else if (funcName === 'spotify_top_artists') {
+              result = await this.spotifyManager.getTopArtists(funcArgs.limit || 20, funcArgs.timeRange || 'medium_term');
+            } else if (funcName === 'spotify_create_playlist_from_top_tracks') {
+              result = await this.spotifyManager.createPlaylistFromTopTracks(funcArgs.name, funcArgs.timeRange || 'medium_term', funcArgs.limit || 30);
+            } else if (funcName === 'spotify_recently_played') {
+              result = await this.spotifyManager.getRecentlyPlayed(funcArgs.limit || 20);
+            } else if (funcName === 'spotify_like_track') {
+              result = await this.spotifyManager.likeTrack(funcArgs.trackUri);
+            } else if (funcName === 'spotify_set_shuffle') {
+              result = await this.spotifyManager.setShuffle(funcArgs.enabled);
+            } else if (funcName === 'spotify_set_repeat') {
+              result = await this.spotifyManager.setRepeatMode(funcArgs.mode);
+            } else if (funcName === 'spotify_follow_playlist') {
+              result = await this.spotifyManager.followPlaylist(funcArgs.playlistUri);
+            } else if (funcName === 'spotify_recommendations') {
+              result = await this.spotifyManager.getRecommendationsFromTrack(funcArgs.trackUri, funcArgs.limit || 10);
             }
             // Executar ferramentas de atalhos
             else if (funcName === 'shortcut_execute_mode') {

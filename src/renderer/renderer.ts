@@ -133,6 +133,9 @@ function setupEventListeners(): void {
   });
 
   const api = getElectronAPI();
+  api?.onModelPullProgress?.((data: { status: string }) => {
+    showToast(`📥 ${data.status}`);
+  });
   api?.onKarenMessageBlock?.((data: { block: string }) => {
     addMessage('assistant', data.block);
   });

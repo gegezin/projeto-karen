@@ -1,10 +1,20 @@
 import { app, BrowserWindow, ipcMain, dialog, screen, nativeImage, Tray, Menu, globalShortcut, shell } from 'electron';
+
+// Necessário no Windows para taskbar e bandeja associarem o ícone correto à Karen.
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.karen.assistant');
+}
+
 import * as path from 'path';
 import * as dotenv from 'dotenv';
 import { PermissionManager } from '../permissions/permissionManager';
 
-// Load environment variables
-dotenv.config({ path: path.join(__dirname, '../../.env') });
+// Em desenvolvimento, le da raiz do projeto; no app instalado, permite um
+// .env opcional ao lado do executavel.
+const envPath = app.isPackaged
+  ? path.join(path.dirname(app.getPath('exe')), '.env')
+  : path.join(__dirname, '../../.env');
+dotenv.config({ path: envPath });
 import { SystemAutomation } from '../automation/systemAutomation';
 import { configManager } from '../config/configManager';
 import { conversationHistory } from '../conversation/conversationHistory';
@@ -22,10 +32,12 @@ import { TtsController } from '../voice/ttsController';
 import { SttController } from '../voice/sttController';
 import { FileConversionController } from '../conversion/fileConversionController';
 import { verifyBundledBinaries } from './binaryPaths';
+import { isModelAvailable, pullModel } from './modelSetup';
 import { OllamaAuthController } from '../integrations/ollama/ollamaAuthController';
 
 class IADesktopAssistant {
   private mainWindow: BrowserWindow | null = null;
+  private normalBounds: Electron.Rectangle | null = null;
   private tray: Tray | null = null;
   private karenBrain: KarenBrain;
   private permissionManager: PermissionManager;
@@ -45,7 +57,8 @@ class IADesktopAssistant {
     verifyBundledBinaries();
     
     // Inicializar novos managers com credenciais de variáveis de ambiente
-    const spotifyClientId = process.env.SPOTIFY_CLIENT_ID || '';
+    const DEFAULT_SPOTIFY_CLIENT_ID = 'be0d9a57e781456b83bf27ccbd89bc7e';
+    const spotifyClientId = process.env.SPOTIFY_CLIENT_ID || DEFAULT_SPOTIFY_CLIENT_ID;
     const spotifyClientSecret = process.env.SPOTIFY_CLIENT_SECRET || '';
     const spotifyRedirectUri = process.env.SPOTIFY_REDIRECT_URI || 'http://127.0.0.1:8888/callback';
     
@@ -59,8 +72,25 @@ class IADesktopAssistant {
       spotifyRedirectUri
     );
 
-    const googleClientId = process.env.GOOGLE_CLIENT_ID || '';
-    const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET || '';
+    // Carrega credenciais do Google de forma segura: tenta ler do arquivo local ignorado
+    // (src/config/googleCredentials.local.ts). Caso falhe, usa variáveis de ambiente ou
+    // valores padrão vazios. Essa abordagem evita que segredos fiquem versionados.
+    let localGoogleCreds: { GOOGLE_CLIENT_ID?: string; GOOGLE_CLIENT_SECRET?: string } = {};
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      localGoogleCreds = require('../config/googleCredentials.local');
+    } catch {
+      console.warn('⚠️ Credenciais Google locais não encontradas – copie googleCredentials.local.example.ts e preencha.');
+    }
+
+    const googleClientId =
+      process.env.GOOGLE_CLIENT_ID ||
+      localGoogleCreds.GOOGLE_CLIENT_ID ||
+      '';
+    const googleClientSecret =
+      process.env.GOOGLE_CLIENT_SECRET ||
+      localGoogleCreds.GOOGLE_CLIENT_SECRET ||
+      '';
     const googleRedirectUri = process.env.GOOGLE_REDIRECT_URI || 'http://127.0.0.1:8888/callback';
 
     if (!googleClientId || !googleClientSecret) {
@@ -99,11 +129,12 @@ class IADesktopAssistant {
   }
 
   private init(): void {
-    app.whenReady().then(() => {
+    app.whenReady().then(async () => {
       this.createWindow();
       this.createTray();
       this.setupIPC();
       this.setupGlobalShortcuts();
+      await this.setupConfiguredModel();
     });
 
     app.on('window-all-closed', () => {
@@ -125,6 +156,29 @@ class IADesktopAssistant {
     });
   }
 
+  private async setupConfiguredModel(): Promise<void> {
+    const modelName = this.karenBrain.getModelName();
+    if (modelName.endsWith(':cloud')) {
+      return;
+    }
+
+    const available = await isModelAvailable(modelName);
+    if (available) {
+      return;
+    }
+
+    console.log(`📥 Modelo ${modelName} não encontrado localmente, baixando...`);
+    const result = await pullModel(modelName, this.mainWindow);
+    if (result.success) {
+      console.log(`✅ Modelo ${modelName} baixado com sucesso`);
+    } else {
+      console.error(`❌ Falha ao baixar modelo ${modelName}:`, result.error);
+      this.mainWindow?.webContents.send('model-pull-progress', {
+        status: `Falha ao baixar ${modelName}: ${result.error || 'erro desconhecido'}`
+      });
+    }
+  }
+
   private createWindow(): void {
     // Limpar listeners da janela anterior se existir
     this.cleanupWindowEvents();
@@ -136,7 +190,7 @@ class IADesktopAssistant {
       height: 700,
       x: width - 470,
       y: 50,
-      alwaysOnTop: true,
+      alwaysOnTop: false,
       skipTaskbar: false,
       frame: false,
       transparent: true,
@@ -193,6 +247,11 @@ class IADesktopAssistant {
         event.preventDefault();
       } else if (input.key === 'Escape' && win.isFullScreen()) {
         win.setFullScreen(false);
+        setTimeout(() => {
+          if (!win.isDestroyed() && this.normalBounds) {
+            win.setBounds(this.normalBounds);
+          }
+        }, 100);
         event.preventDefault();
       }
     });
@@ -323,10 +382,17 @@ class IADesktopAssistant {
   }
 
   private createTray(): void {
-    // Criar ícone padrão (pode ser substituído por um arquivo .ico)
-    const icon = nativeImage.createFromNamedImage('TemplateImage', [0, 0, 0, 0]);
-    const resizedIcon = icon.resize({ width: 16, height: 16 });
-    this.tray = resizedIcon ? new Tray(resizedIcon) : new Tray(icon);
+    const iconPath = app.isPackaged
+      ? path.join(process.resourcesPath, 'karen_icon_proposta.ico')
+      : path.join(process.cwd(), 'build', 'karen_icon_proposta.ico');
+    const icon = nativeImage.createFromPath(iconPath);
+    const resizedIcon = icon.isEmpty() ? icon : icon.resize({ width: 16, height: 16 });
+
+    if (icon.isEmpty()) {
+      console.warn(`⚠️ Ícone da bandeja não encontrado em: ${iconPath}`);
+    }
+
+    this.tray = new Tray(resizedIcon);
     
     const contextMenu = Menu.buildFromTemplate([
       { label: 'Abrir Assistente', click: () => this.mainWindow?.show() },
@@ -337,7 +403,7 @@ class IADesktopAssistant {
       { label: 'Sair', click: () => { this.isQuitting = true; app.quit(); } }
     ]);
 
-    this.tray.setToolTip('IA Desktop Assistant');
+    this.tray.setToolTip('Karen IA Assistant');
     this.tray.setContextMenu(contextMenu);
     
     this.tray.on('click', () => {
@@ -473,18 +539,23 @@ class IADesktopAssistant {
       }
 
       const nextState = !this.mainWindow.isFullScreen();
-      this.mainWindow.setFullScreen(nextState);
+      if (nextState) {
+        this.normalBounds = this.mainWindow.getBounds();
+        this.mainWindow.setFullScreen(true);
+      } else {
+        this.mainWindow.setFullScreen(false);
+        setTimeout(() => {
+          if (this.mainWindow && !this.mainWindow.isDestroyed() && this.normalBounds) {
+            this.mainWindow.setBounds(this.normalBounds);
+          }
+        }, 100);
+      }
       event.sender.send('fullscreen-state-changed', nextState);
       return nextState;
     });
 
     ipcMain.handle('tts-speak', async (_event, text: string) => {
-      try {
-        await this.ttsController.speak(text);
-        return { success: true };
-      } catch (error: any) {
-        return { success: false, error: error.message };
-      }
+      return await this.ttsController.speak(text);
     });
 
     ipcMain.handle('tts-stop', async () => {

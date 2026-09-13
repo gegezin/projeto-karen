@@ -1,10 +1,21 @@
 # Dependencies
 node_modules/
 
-# Build output
+# Build output real (o instalador gerado, não os recursos de build)
 dist/
-build/
 release/
+
+# Recursos de build - ESTES SÃO VERSIONADOS (ícone, script NSIS), só o
+# resultado do build (release/) é ignorado. Não coloque nada aqui além de
+# arquivos de configuração pequenos.
+
+# Binários de terceiros - grandes demais pro Git, baixados sob demanda
+vendor/python/*
+vendor/pandoc/*
+vendor/7zip/*
+vendor/ollama/*
+!vendor/**/.gitkeep
+!vendor/README.md
 
 # Environment variables
 .env
@@ -32,3 +43,4 @@ Thumbs.db
 
 # Electron
 out/
+src/config/googleCredentials.local.ts

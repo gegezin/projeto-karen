@@ -30,7 +30,18 @@ export class SpotifyManager {
   private redirectUri: string;
   private codeVerifier = '';
   private isAuthenticated: boolean = false;
-  private scopes = ['user-read-playback-state', 'user-modify-playback-state', 'user-read-currently-playing', 'playlist-read-private', 'playlist-modify-public', 'playlist-modify-private'];
+  private scopes = [
+    'user-read-playback-state',
+    'user-modify-playback-state',
+    'user-read-currently-playing',
+    'playlist-read-private',
+    'playlist-modify-public',
+    'playlist-modify-private',
+    'user-top-read',
+    'user-read-recently-played',
+    'user-library-read',
+    'user-library-modify'
+  ];
   private tokenFilePath: string;
 
   constructor(
@@ -372,7 +383,17 @@ export class SpotifyManager {
     }
 
     try {
-      await this.executeWithRefresh(() => this.spotifyApi.play({ uris: [trackUri] }));
+      const currentState = await this.executeWithRefresh(() =>
+        this.spotifyApi.getMyCurrentPlaybackState()
+      );
+      const isCurrentlyPlaying = currentState?.body?.is_playing;
+
+      if (isCurrentlyPlaying) {
+        await this.executeWithRefresh(() => this.spotifyApi.addToQueue(trackUri));
+        await this.executeWithRefresh(() => this.spotifyApi.skipToNext());
+      } else {
+        await this.executeWithRefresh(() => this.spotifyApi.play({ uris: [trackUri] }));
+      }
       return true;
     } catch (error) {
       console.error('Erro ao tocar música:', error);
@@ -610,6 +631,158 @@ export class SpotifyManager {
     } catch (error) {
       console.error('Erro ao remover música da playlist:', error);
       return false;
+    }
+  }
+
+  async getTopTracks(limit: number = 20, timeRange: 'short_term' | 'medium_term' | 'long_term' = 'medium_term'): Promise<SpotifyTrack[]> {
+    if (!this.isAuthenticated) return [];
+
+    try {
+      const data = await this.executeWithRefresh(() =>
+        this.spotifyApi.getMyTopTracks({ limit, time_range: timeRange })
+      );
+      if (!data?.body?.items) return [];
+      return data.body.items.map((track: any) => ({
+        name: track.name,
+        artist: track.artists.map((artist: any) => artist.name).join(', '),
+        album: track.album.name,
+        uri: track.uri,
+        duration_ms: track.duration_ms
+      }));
+    } catch (error) {
+      console.error('Erro ao buscar top músicas:', error);
+      return [];
+    }
+  }
+
+  async getTopArtists(limit: number = 20, timeRange: 'short_term' | 'medium_term' | 'long_term' = 'medium_term'): Promise<Array<{ name: string; uri: string; genres: string[] }>> {
+    if (!this.isAuthenticated) return [];
+
+    try {
+      const data = await this.executeWithRefresh(() =>
+        this.spotifyApi.getMyTopArtists({ limit, time_range: timeRange })
+      );
+      if (!data?.body?.items) return [];
+      return data.body.items.map((artist: any) => ({
+        name: artist.name,
+        uri: artist.uri,
+        genres: artist.genres || []
+      }));
+    } catch (error) {
+      console.error('Erro ao buscar top artistas:', error);
+      return [];
+    }
+  }
+
+  async createPlaylistFromTopTracks(name: string, timeRange: 'short_term' | 'medium_term' | 'long_term' = 'medium_term', limit: number = 30): Promise<SpotifyPlaylist | null> {
+    const topTracks = await this.getTopTracks(limit, timeRange);
+    if (topTracks.length === 0) return null;
+
+    const playlist = await this.createPlaylist(name, 'Suas músicas mais tocadas - gerada automaticamente pela Karen');
+    if (!playlist) return null;
+
+    try {
+      await this.executeWithRefresh(() =>
+        this.spotifyApi.addTracksToPlaylist(playlist.uri, topTracks.map(track => track.uri).slice(0, 100))
+      );
+      return { ...playlist, tracks: topTracks.length };
+    } catch (error) {
+      console.error('Erro ao preencher playlist de top músicas:', error);
+      return null;
+    }
+  }
+
+  async getRecentlyPlayed(limit: number = 20): Promise<SpotifyTrack[]> {
+    if (!this.isAuthenticated) return [];
+
+    try {
+      const data = await this.executeWithRefresh(() =>
+        this.spotifyApi.getMyRecentlyPlayedTracks({ limit })
+      );
+      if (!data?.body?.items) return [];
+      return data.body.items.map((item: any) => ({
+        name: item.track.name,
+        artist: item.track.artists.map((artist: any) => artist.name).join(', '),
+        album: item.track.album.name,
+        uri: item.track.uri,
+        duration_ms: item.track.duration_ms
+      }));
+    } catch (error) {
+      console.error('Erro ao buscar músicas recentes:', error);
+      return [];
+    }
+  }
+
+  async likeTrack(trackUri?: string): Promise<boolean> {
+    if (!this.isAuthenticated) return false;
+
+    try {
+      const currentTrack = trackUri ? { uri: trackUri } : await this.getCurrentTrack();
+      if (!currentTrack) return false;
+      const trackId = currentTrack.uri.split(':').pop();
+      if (!trackId) return false;
+      await this.executeWithRefresh(() => this.spotifyApi.addToMySavedTracks([trackId]));
+      return true;
+    } catch (error) {
+      console.error('Erro ao curtir música:', error);
+      return false;
+    }
+  }
+
+  async setShuffle(state: boolean): Promise<boolean> {
+    if (!this.isAuthenticated) return false;
+    try {
+      await this.executeWithRefresh(() => this.spotifyApi.setShuffle(state));
+      return true;
+    } catch (error) {
+      console.error('Erro ao ajustar shuffle:', error);
+      return false;
+    }
+  }
+
+  async setRepeatMode(mode: 'track' | 'context' | 'off'): Promise<boolean> {
+    if (!this.isAuthenticated) return false;
+    try {
+      await this.executeWithRefresh(() => this.spotifyApi.setRepeat(mode));
+      return true;
+    } catch (error) {
+      console.error('Erro ao ajustar modo de repetição:', error);
+      return false;
+    }
+  }
+
+  async followPlaylist(playlistUri: string): Promise<boolean> {
+    if (!this.isAuthenticated) return false;
+    try {
+      const playlistId = playlistUri.split(':').pop();
+      if (!playlistId) return false;
+      await this.executeWithRefresh(() => this.spotifyApi.followPlaylist(playlistId));
+      return true;
+    } catch (error) {
+      console.error('Erro ao seguir playlist:', error);
+      return false;
+    }
+  }
+
+  async getRecommendationsFromTrack(trackUri: string, limit: number = 10): Promise<SpotifyTrack[]> {
+    if (!this.isAuthenticated) return [];
+    try {
+      const trackId = trackUri.split(':').pop();
+      if (!trackId) return [];
+      const data = await this.executeWithRefresh(() =>
+        this.spotifyApi.getRecommendations({ seed_tracks: [trackId], limit })
+      );
+      if (!data?.body?.tracks) return [];
+      return data.body.tracks.map((track: any) => ({
+        name: track.name,
+        artist: track.artists.map((artist: any) => artist.name).join(', '),
+        album: track.album.name,
+        uri: track.uri,
+        duration_ms: track.duration_ms
+      }));
+    } catch (error) {
+      console.error('Erro ao buscar recomendações:', error);
+      return [];
     }
   }
 }
