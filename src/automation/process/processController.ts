@@ -200,7 +200,21 @@ export class ProcessController {
         return;
       }
       
-      // Fallback: usar comando start (mais confiável)
+      // Fallback: tentar resolver via atalho do Menu Iniciar
+      const shortcutPath = await this.resolveViaStartMenuShortcut(programName);
+      if (shortcutPath) {
+        console.log(`🚀 Usando atalho do Menu Iniciar para: ${shortcutPath}`);
+        exec(`start "" "${shortcutPath}"`, (error) => {
+          if (!error) {
+            console.log(`✅ Programa aberto via atalho: ${shortcutPath}`);
+          } else {
+            console.error('❌ Erro ao abrir atalho:', error);
+          }
+        });
+        return;
+      }
+
+      // Se não encontrou atalho, usar comando start padrão
       console.log(`🚀 Usando comando start para: ${programName}`);
       exec(`start "" "${programName}"`, (error) => {
         if (!error) {
@@ -485,5 +499,49 @@ export class ProcessController {
     } catch (error: any) {
       return { stdout: '', stderr: error.message };
     }
+  }
+  /**
+   * Métodos auxiliares privados para localizar atalhos (.lnk) do Menu Iniciar.
+   * Declarações dentro da classe permitem ao TypeScript reconhecer as assinaturas.
+   */
+  private async resolveViaStartMenuShortcut(programName: string): Promise<string | null> {
+    const startMenuPaths: string[] = [];
+    if (process.env.APPDATA) {
+      startMenuPaths.push(path.join(process.env.APPDATA, 'Microsoft', 'Windows', 'Start Menu', 'Programs'));
+    }
+    // Caminho comum para atalhos de todos os usuários
+    startMenuPaths.push('C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs');
+
+    const target = programName.toLowerCase();
+    for (const basePath of startMenuPaths) {
+      if (fs.existsSync(basePath)) {
+        const found = this.findShortcutRecursive(basePath, target);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+
+  private findShortcutRecursive(dir: string, targetName: string): string | null {
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          const inner = this.findShortcutRecursive(fullPath, targetName);
+          if (inner) return inner;
+        } else if (entry.isFile()) {
+          if (entry.name.toLowerCase().endsWith('.lnk')) {
+            const nameWithoutExt = entry.name.slice(0, -4).toLowerCase();
+            if (nameWithoutExt.includes(targetName)) {
+              return fullPath;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      // Ignorar erros de permissão ou diretórios inacessíveis
+    }
+    return null;
   }
 }
